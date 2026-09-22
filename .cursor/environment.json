@@ -1,0 +1,15 @@
+{
+  "name": "ArcReel",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\" && uv run uvicorn server.app:app --reload --reload-dir server --reload-dir lib --host 0.0.0.0 --port 1241"
+    },
+    {
+      "name": "frontend",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\" && export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 && cd frontend && pnpm dev --host"
+    }
+  ],
+  "ports": [1241, 5173]
+}
