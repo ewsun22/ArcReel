@@ -17,7 +17,6 @@ from lib.artifacts.artifact_activation import (
     ArtifactCurrencyResolver,
     ArtifactInputClaim,
     active_artifact_currency_resolver,
-    artifact_input_is_usable,
     assert_current_artifact_input_claims_usable,
     bind_artifact_input_claims_to_content_digests,
     bind_artifact_input_claims_to_frozen_visuals,
@@ -26,13 +25,15 @@ from lib.artifacts.artifact_activation import (
 )
 from lib.artifacts.artifact_manifest import (
     ArtifactBasisDescriptor,
-    ArtifactKey,
     compose_video_artifact_basis,
 )
 from lib.artifacts.generation_input import (
+    AssetSheetInput,
     FrozenGenerationInput,
     InputRefused,
     StoryboardImageInput,
+    asset_sheet_input,
+    grid_references,
     project_input_observation,
     storyboard_image_input,
 )
@@ -42,8 +43,6 @@ from lib.artifacts.video_artifact_facts import VideoArtifactCurrencyFacts
 from lib.artifacts.video_visual_provenance import build_storyboard_video_visual_basis
 from lib.artifacts.visual_artifact_provenance import (
     GridStoryboardVisual,
-    VisualReference,
-    build_asset_sheet_visual_basis,
     build_grid_composite_visual_basis,
     build_storyboard_video_artifact_visual_basis,
     project_basis_style_description,
@@ -60,14 +59,12 @@ from lib.generation.generation_queue import (
 )
 from lib.infra.api_errors import ConflictError
 from lib.infra.async_thread import EventLoopBridge, run_noninterruptible_sync
-from lib.infra.path_safety import safe_exists, safe_join, try_safe_join
+from lib.infra.path_safety import safe_join, try_safe_join
 from lib.infra.schema_guards import is_int
 from lib.infra.thumbnail import extract_video_thumbnail
 from lib.project.asset_derivatives import DERIVATIVE_ASSET_TYPE, DERIVATIVE_TASK_TYPE
 from lib.project.asset_types import (
     ASSET_SPECS,
-    normalize_asset_bucket,
-    normalize_asset_name,
     resolve_asset_key,
     validate_asset_name,
 )
@@ -80,16 +77,9 @@ from lib.project.project_manager import (
     resolve_episode_script_binding,
 )
 from lib.project.resource_paths import CHARACTER_DERIVATIVE_RESOURCE_TYPE, resource_relative_path
-from lib.prompts.prompt_builders import (
-    build_character_prompt,
-    build_product_prompt,
-    build_prop_prompt,
-    build_scene_prompt,
-)
 from lib.prompts.prompt_style import normalize_style_value
 from lib.prompts.prompt_utils import render_storyboard_video_prompt
 from lib.prompts.reference_image_numbering import clamp_reference_images
-from lib.references.reference_catalog import build_reference_catalog
 from lib.script.reference_video.duration_slots import DEFAULT_PLANNED_DURATION_SECONDS
 from lib.script.reference_video.execution_checkpoint import (
     NarrationExecutionFacts,
@@ -204,89 +194,6 @@ def assert_duration_supported(duration: int | float | str, supported_durations: 
             duration=seconds,
             supported=", ".join(str(d) for d in supported_durations),
         )
-
-
-def _collect_sheet_references(
-    project: dict,
-    project_path: Path,
-    items: list[dict],
-    *,
-    char_field: str | None,
-    scene_field: str,
-    prop_field: str,
-    max_count: int = 0,
-    visual_references: list[VisualReference] | None = None,
-    currency_resolver: ArtifactCurrencyResolver,
-    formal_claims: list[ArtifactInputClaim] | None = None,
-) -> tuple[list[dict], set[str]]:
-    """Collect character_sheet, scene_sheet and prop_sheet references from scene/segment items.
-
-    Returns (list of ``{"image": Path}`` dicts, set of relative sheet strings for dedup).
-    If *max_count* > 0 collection stops after that many images.
-
-    参考图对后端只按数组序位传输；资产名只进 ``visual_references`` 的逻辑身份，供 prompt
-    渲染层把正文里的 ``@[登记名]`` 换成对应序位的「图N」。
-
-    引用名经 :class:`lib.references.reference_catalog.ReferenceCatalog` 解析：``characters_in_*`` 里
-    写的 ``本体名/衍生名`` 因此取到该形态自己的资产图（见 ``docs/adr/0072``），本体与衍生
-    同现时各注入一张——它们是两个引用名、两条资产图路径，天然不互相去重。目录同时收敛
-    NFC/NFD 判等坐标系（登记闸口落 NFC，存量剧本与桶均无需迁移）。
-
-    ``char_field`` 为 ``None`` 表示该骨架无逐条角色名单字段（video_units：角色以
-    references 条目形态存在），``item.get(None) or []`` 天然跳过角色 sheet 收集。
-    """
-    seen: set[str] = set()
-    refs: list[dict] = []
-
-    catalog = build_reference_catalog(project)
-    sources = (
-        ("character", char_field),
-        ("scene", scene_field),
-        ("prop", prop_field),
-    )
-
-    for item in items:
-        for asset_type, field in sources:
-            for name in item.get(field) or []:
-                if not isinstance(name, str):
-                    continue
-                entry = catalog.lookup(asset_type, name)
-                if entry is None:
-                    continue
-                data = entry.asset
-                sheet = data.get(entry.spec.sheet_field) if isinstance(data, dict) else None
-                if not isinstance(sheet, str) or not sheet or sheet in seen:
-                    continue
-                path = project_path / sheet
-                if not path.exists():
-                    continue
-                if max_count and len(refs) >= max_count:
-                    seen.add(sheet)
-                    continue
-                key = ArtifactKey.asset_sheet(asset_type, entry.name)
-                if not artifact_input_is_usable(
-                    resolver=currency_resolver,
-                    key=key,
-                    artifact_path=sheet,
-                    claims=formal_claims,
-                ):
-                    continue
-                refs.append({"image": path})
-                if visual_references is not None:
-                    visual_references.append(
-                        VisualReference(
-                            path=path,
-                            role="asset_sheet",
-                            logical_type=asset_type,
-                            logical_id=name,
-                            kind="sheet",
-                        )
-                    )
-                seen.add(sheet)
-        if max_count and len(refs) >= max_count:
-            break
-
-    return refs, seen
 
 
 def _episode_from_script(script: dict[str, Any] | None) -> int | None:
@@ -1652,109 +1559,7 @@ async def finalize_video_task(
     return result
 
 
-async def execute_character_task(
-    project_name: str,
-    resource_id: str,
-    payload: dict[str, Any],
-    *,
-    user_id: str = DEFAULT_USER_ID,
-    task_id: str | None = None,
-) -> dict[str, Any]:
-    prompt = str(payload.get("prompt", "") or "").strip()
-    if not prompt:
-        raise ValueError("prompt is required for character task")
-
-    def _prepare_char():
-        _project = get_project_manager().load_project(project_name)
-        _project_path = get_project_manager().get_project_path(project_name)
-        _char_key = resolve_asset_key(_project.get("characters"), resource_id)
-        if _char_key is None:
-            raise ValueError(f"character not found: {resource_id}")
-        _char_data = _project["characters"][_char_key]
-        _style = _project.get("style", "")
-        _style_desc = _project.get("style_description", "")
-        _full_prompt = build_character_prompt(resource_id, prompt, _style, _style_desc)
-        _ref_images = None
-        _ref_path = _char_data.get("reference_image")
-        if _ref_path:
-            _full_ref = _project_path / _ref_path
-            if _full_ref.exists():
-                _ref_images = [_full_ref]
-        _visual_references = tuple(
-            VisualReference(
-                path=path,
-                role="source",
-                logical_type="character",
-                logical_id=resource_id,
-                kind="original",
-            )
-            for path in (_ref_images or [])
-        )
-        _frozen = freeze_image_references(_ref_images, _visual_references)
-        try:
-            _basis = build_asset_sheet_visual_basis(
-                asset_type="character",
-                asset_id=resource_id,
-                description=prompt,
-                style=str(_style or ""),
-                style_description=str(_style_desc or ""),
-                aspect_ratio="16:9",
-                references=_frozen.visual_references,
-            )
-        except BaseException:
-            _frozen.cleanup()
-            raise
-        return _project, _full_prompt, _frozen, _basis
-
-    project, full_prompt, frozen_references, basis = await asyncio.to_thread(_prepare_char)
-    return await run_asset_sheet_image_task(
-        asset_type="character",
-        project_name=project_name,
-        resource_id=resource_id,
-        payload=payload,
-        user_id=user_id,
-        task_id=task_id,
-        project=project,
-        full_prompt=full_prompt,
-        frozen_references=frozen_references,
-        basis=basis,
-        project_manager=get_project_manager(),
-    )
-
-
-# 仅保留 design 任务的「prompt 构造器」差异；bucket_key 与 sheet 写入由 ASSET_SPECS 与
-# ProjectManager._update_asset_sheet 统一派发。
-_DESIGN_PROMPT_BUILDERS: dict[str, Any] = {
-    "scene": build_scene_prompt,
-    "prop": build_prop_prompt,
-    "product": build_product_prompt,
-}
-
-
-def _collect_product_reference_images(project: dict, project_path: Path, resource_id: str) -> list[Path] | None:
-    """商品原图（保真验收锚点）作为 sheet 标准化整理的参考输入；缺失文件跳过。"""
-    entry = normalize_asset_bucket(project.get("products")).get(normalize_asset_name(resource_id)) or {}
-    refs = entry.get("reference_images")
-    if not isinstance(refs, list):
-        return None
-    # safe_exists 同时兜住脏数据（非字符串）、越出项目目录的绝对路径 / `..` 穿越与文件缺失
-    existing = [project_path / ref for ref in refs if safe_exists(project_path, ref)]
-    if refs and not existing:
-        # 声明了原图却全部缺失：下游（sheet 生成 / 分镜保真注入）静默退化会丢失保真锚定，
-        # 留观测痕迹便于诊断（不阻塞——文件缺失可能是归档迁移等正常历史原因）。
-        # 文案保持场景中立：本函数同时服务 sheet 生成与商品分镜参考收集两个调用方。
-        logger.warning("商品 '%s' 声明了 %d 张原图但磁盘均缺失", resource_id, len(refs))
-    return existing or None
-
-
-# design 任务的参考图收集器差异：product 的 sheet 是「原图 → 标准多角度图」的整理，
-# 原图全量注入；scene / prop 维持纯文生图。
-_DESIGN_REFERENCE_COLLECTORS: dict[str, Any] = {
-    "product": _collect_product_reference_images,
-}
-
-
-async def execute_design_task(
+async def execute_asset_sheet_task(
     kind: str,
     project_name: str,
     resource_id: str,
@@ -1763,64 +1568,74 @@ async def execute_design_task(
     user_id: str = DEFAULT_USER_ID,
     task_id: str | None = None,
 ) -> dict[str, Any]:
-    """合并 execute_scene_task / execute_prop_task / execute_product_task：按 kind 查表派发。"""
-    spec = ASSET_SPECS[kind]
-    bucket_key = spec.bucket_key
-    prompt_builder = _DESIGN_PROMPT_BUILDERS[kind]
-    reference_collector = _DESIGN_REFERENCE_COLLECTORS.get(kind)
+    """资产图（角色、场景、道具、商品）：描述取自存储的条目，参考图与依据取自生成输入。"""
 
-    prompt = str(payload.get("prompt", "") or "").strip()
-    if not prompt:
-        raise ValueError(f"prompt is required for {kind} task")
-
-    def _prepare():
-        project = get_project_manager().load_project(project_name)
-        project_path = get_project_manager().get_project_path(project_name)
-        if resource_id not in project.get(bucket_key, {}):
-            raise ValueError(f"{kind} not found: {resource_id}")
-        style = project.get("style", "")
-        style_desc = project.get("style_description", "")
-        full_prompt = prompt_builder(resource_id, prompt, style, style_desc)
-        refs = reference_collector(project, project_path, resource_id) if reference_collector else None
-        visual_references = tuple(
-            VisualReference(
-                path=path,
-                role="source",
-                logical_type=kind,
-                logical_id=resource_id,
-                kind="original",
-            )
-            for path in (refs or [])
+    def _load() -> tuple[dict[str, Any], Path, AssetSheetInput]:
+        _project = get_project_manager().load_project(project_name)
+        _project_path = get_project_manager().get_project_path(project_name)
+        _generation_input = asset_sheet_input(
+            _project,
+            asset_type=kind,
+            name=resource_id,
+            observation=project_input_observation(_project_path),
         )
-        frozen = freeze_image_references(refs, visual_references)
-        try:
-            basis = build_asset_sheet_visual_basis(
-                asset_type=kind,
-                asset_id=resource_id,
-                description=prompt,
-                style=str(style or ""),
-                style_description=str(style_desc or ""),
-                aspect_ratio="16:9",
-                references=frozen.visual_references,
-            )
-        except BaseException:
-            frozen.cleanup()
-            raise
-        return project, full_prompt, frozen, basis
+        # 生成输入不成立时在解析供应商通道与付费之前失败，一次报出全部缺口。
+        if isinstance(_generation_input, InputRefused):
+            raise input_refusal_error(_generation_input)
+        return _project, _project_path, _generation_input
 
-    project, full_prompt, frozen_references, basis = await asyncio.to_thread(_prepare)
-    return await run_asset_sheet_image_task(
-        asset_type=kind,
-        project_name=project_name,
-        resource_id=resource_id,
-        payload=payload,
-        user_id=user_id,
-        task_id=task_id,
+    project, project_path, generation_input = await asyncio.to_thread(_load)
+    context = await resolve_generation_context(
+        project_name,
+        payload,
         project=project,
-        full_prompt=full_prompt,
-        frozen_references=frozen_references,
-        basis=basis,
-        project_manager=get_project_manager(),
+        project_path=project_path,
+        user_id=user_id,
+        image=ImageLaneRequest(generation_type="i2i" if generation_input.references else "t2i"),
+    )
+
+    def _freeze() -> FrozenGenerationInput:
+        return generation_input.freeze(
+            max_reference_images=context.image.max_reference_images,
+            model=context.image.backend_model,
+            bind_claims=_originals_have_no_claims,
+        )
+
+    with await asyncio.to_thread(_freeze) as frozen:
+        return await run_asset_sheet_image_task(
+            asset_type=kind,
+            project_name=project_name,
+            resource_id=resource_id,
+            payload=payload,
+            user_id=user_id,
+            task_id=task_id,
+            project=project,
+            frozen=frozen,
+            context=context,
+            project_manager=get_project_manager(),
+        )
+
+
+def _originals_have_no_claims(
+    claims: Sequence[ArtifactInputClaim], _content_digests: Mapping[str, str]
+) -> tuple[ArtifactInputClaim, ...]:
+    """资产图的参考图只有作者上传的原图，原图不是登记产物，没有 claim 要复核。"""
+
+    if claims:
+        raise ValueError("asset sheet references carry no artifact input claims")
+    return ()
+
+
+async def execute_character_task(
+    project_name: str,
+    resource_id: str,
+    payload: dict[str, Any],
+    *,
+    user_id: str = DEFAULT_USER_ID,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    return await execute_asset_sheet_task(
+        "character", project_name, resource_id, payload, user_id=user_id, task_id=task_id
     )
 
 
@@ -1832,7 +1647,7 @@ async def execute_scene_task(
     user_id: str = DEFAULT_USER_ID,
     task_id: str | None = None,
 ) -> dict[str, Any]:
-    return await execute_design_task("scene", project_name, resource_id, payload, user_id=user_id, task_id=task_id)
+    return await execute_asset_sheet_task("scene", project_name, resource_id, payload, user_id=user_id, task_id=task_id)
 
 
 async def execute_prop_task(
@@ -1843,7 +1658,7 @@ async def execute_prop_task(
     user_id: str = DEFAULT_USER_ID,
     task_id: str | None = None,
 ) -> dict[str, Any]:
-    return await execute_design_task("prop", project_name, resource_id, payload, user_id=user_id, task_id=task_id)
+    return await execute_asset_sheet_task("prop", project_name, resource_id, payload, user_id=user_id, task_id=task_id)
 
 
 async def execute_product_task(
@@ -1854,81 +1669,9 @@ async def execute_product_task(
     user_id: str = DEFAULT_USER_ID,
     task_id: str | None = None,
 ) -> dict[str, Any]:
-    return await execute_design_task("product", project_name, resource_id, payload, user_id=user_id, task_id=task_id)
-
-
-def _collect_grid_reference_images(
-    project_path: Path,
-    payload: dict[str, Any],
-    scene_ids: list[str],
-    *,
-    project: dict[str, Any] | None = None,
-    script: dict[str, Any] | None = None,
-    currency_resolver: ArtifactCurrencyResolver,
-    formal_claims: list[ArtifactInputClaim] | None = None,
-    visual_references: list[VisualReference] | None = None,
-) -> tuple[list[object] | None, list[dict]]:
-    """Collect character/scene/prop sheet images referenced by grid scenes.
-
-    Returns a tuple of ``(image_paths, metadata)``:
-    - *image_paths*: up to 6 :class:`~pathlib.Path` objects for the generation API.
-    - *metadata*: list of dicts ``{path, name, ref_type}`` for persisting in
-      :class:`~lib.script.grid.models.GridGeneration`.
-    """
-    if project is None:
-        project_json = project_path / "project.json"
-        if not project_json.exists():
-            return None, []
-        import json
-
-        loaded_project = json.loads(project_json.read_text(encoding="utf-8"))
-        if not isinstance(loaded_project, dict):
-            return None, []
-        project = loaded_project
-
-    script_file = payload.get("script_file")
-    if not script_file:
-        return None, []
-
-    if script is None:
-        script_path = project_path / "scripts" / script_file
-        if not script_path.exists():
-            return None, []
-        import json
-
-        loaded_script = json.loads(script_path.read_text(encoding="utf-8"))
-        if not isinstance(loaded_script, dict):
-            return None, []
-        script = loaded_script
-
-    items, id_field, char_field, scene_field, prop_field = get_storyboard_items(script)
-
-    scene_id_set = set(scene_ids)
-    matched_items = [item for item in items if str(item.get(id_field, "")) in scene_id_set]
-    selected_visuals: list[VisualReference] = []
-    references, _seen = _collect_sheet_references(
-        project,
-        project_path,
-        matched_items,
-        char_field=char_field,
-        scene_field=scene_field,
-        prop_field=prop_field,
-        max_count=6,
-        visual_references=selected_visuals,
-        currency_resolver=currency_resolver,
-        formal_claims=formal_claims,
+    return await execute_asset_sheet_task(
+        "product", project_name, resource_id, payload, user_id=user_id, task_id=task_id
     )
-    if visual_references is not None:
-        visual_references.extend(selected_visuals)
-    metadata = [
-        {
-            "path": reference.path.relative_to(project_path).as_posix(),
-            "name": reference.logical_id,
-            "ref_type": reference.logical_type,
-        }
-        for _provider, reference in zip(references, selected_visuals, strict=True)
-    ]
-    return [reference["image"] for reference in references] or None, metadata
 
 
 async def execute_grid_task(
@@ -1977,23 +1720,30 @@ async def execute_grid_task(
         grid.error_message = None
         grid_manager.save(grid)
 
+        items, id_field, _char_field, _scene_field, _prop_field = get_storyboard_items(script)
+        item_by_id = {str(item.get(id_field)): item for item in items if isinstance(item, dict)}
+        if len(set(grid.scene_ids)) != len(grid.scene_ids):
+            raise ValueError("grid scene identities must be unique")
+        missing_members = [scene_id for scene_id in grid.scene_ids if scene_id not in item_by_id]
+        if missing_members:
+            raise ValueError(f"grid scenes are no longer present in the bound script: {missing_members}")
+
         # c) Build reference images + metadata
         from lib.script.grid.models import ReferenceImage
 
-        currency_resolver = await asyncio.to_thread(active_artifact_currency_resolver, project_path, project)
-        formal_claims: list[ArtifactInputClaim] = [script_input.claim]
-        visual_references: list[VisualReference] = []
-        reference_images, ref_metadata = await asyncio.to_thread(
-            _collect_grid_reference_images,
-            project_path,
-            payload,
-            grid.scene_ids,
-            project=project,
-            script=script,
-            currency_resolver=currency_resolver,
-            formal_claims=formal_claims,
-            visual_references=visual_references,
+        grid_input = await asyncio.to_thread(
+            grid_references,
+            project,
+            script,
+            member_ids=grid.scene_ids,
+            observation=project_input_observation(project_path),
         )
+        # 参考图集不成立时在解析供应商通道与付费之前失败，一次报出全部缺口。
+        if isinstance(grid_input, InputRefused):
+            raise input_refusal_error(grid_input)
+        assembled = grid_input.references
+        visual_references = [reference.visual for reference in assembled]
+        currency_resolver = await asyncio.to_thread(active_artifact_currency_resolver, project_path, project)
         # 参考图先于提示词定型：backend 的上限决定实际发出几张，各格正文的「图N」只能按
         # 裁剪后的序列渲染，故 image lane 在冻结之前解析一次并沿用到提交。
         ctx = await resolve_generation_context(
@@ -2002,19 +1752,23 @@ async def execute_grid_task(
             project=project,
             project_path=project_path,
             user_id=user_id,
-            image=ImageLaneRequest(generation_type="i2i" if reference_images else "t2i"),
+            image=ImageLaneRequest(generation_type="i2i" if assembled else "t2i"),
         )
         frozen_references = await asyncio.to_thread(
             freeze_image_references,
-            reference_images,
+            [reference.visual.path for reference in assembled] or None,
             visual_references,
         )
+        # 剧本 claim 排在最前，其后是参考图按冻结字节绑定的 claims。
         formal_claims = list(
             await asyncio.to_thread(
                 bind_artifact_input_claims_to_frozen_visuals,
                 project_path=project_path,
                 resolver=currency_resolver,
-                claims=formal_claims,
+                claims=[
+                    script_input.claim,
+                    *(reference.claim for reference in assembled if reference.claim is not None),
+                ],
                 source_references=visual_references,
                 frozen_references=frozen_references.visual_references,
             )
@@ -2026,17 +1780,18 @@ async def execute_grid_task(
         )
         sent_references = frozen_references.sent(reference_clamp.kept)
         reference_images = sent_references.reference_images
-        grid.reference_images = [ReferenceImage.from_dict(m) for m in ref_metadata] if ref_metadata else []
+        # 宫格的时效判定重放这份记录，故由完整参考集投影，与依据里的参考图逐项对应。
+        grid.reference_images = []
+        for reference in assembled:
+            visual = reference.visual
+            if visual.logical_type is None or visual.logical_id is None:
+                raise ValueError(f"grid reference has no asset identity: {reference.artifact_path}")
+            grid.reference_images.append(
+                ReferenceImage(path=reference.artifact_path, name=visual.logical_id, ref_type=visual.logical_type)
+            )
         grid_manager.save(grid)
 
         # d) Generate grid image
-        items, id_field, _char_field, _scene_field, _prop_field = get_storyboard_items(script)
-        item_by_id = {str(item.get(id_field)): item for item in items if isinstance(item, dict)}
-        if len(set(grid.scene_ids)) != len(grid.scene_ids):
-            raise ValueError("grid scene identities must be unique")
-        missing_members = [scene_id for scene_id in grid.scene_ids if scene_id not in item_by_id]
-        if missing_members:
-            raise ValueError(f"grid scenes are no longer present in the bound script: {missing_members}")
         members = tuple(
             GridStoryboardVisual(
                 resource_id=scene_id,
