@@ -312,6 +312,8 @@ async def test_queued_plan_ignores_internal_payload_and_preserves_typed_failure(
                         hook="悬念",
                         reading_units=800,
                         ledger_status="planned",
+                        first_sentence="第一句。",
+                        last_sentence="最后一句。",
                     )
                 ],
                 cursor=None,
@@ -319,6 +321,8 @@ async def test_queued_plan_ignores_internal_payload_and_preserves_typed_failure(
 
     result = await execute_queued_text_task(task, planner_cls=Planner)
     assert result["episodes"][0]["title"] == "第一集"
+    assert result["episodes"][0]["first_sentence"] == "第一句。"
+    assert result["episodes"][0]["last_sentence"] == "最后一句。"
 
     class FailingPlanner(Planner):
         async def plan(self, instructions=None):
@@ -351,7 +355,7 @@ async def test_cancel_during_started_episode_script_commit_leaves_member_running
         content_mode = "ad"
 
         def __init__(self) -> None:
-            self.project_json = projects.load_project_readonly("script")
+            self.project_json = projects.load_project("script")
 
         @classmethod
         async def create(cls, *_args, **_kwargs):
@@ -491,7 +495,7 @@ async def test_cancel_during_started_episode_plan_commit_leaves_member_running_t
     assert batch.done is True
     assert batch.members[0].status == "succeeded"
     assert (project_path / "project.json").read_bytes() != before_project
-    assert [episode["title"] for episode in projects.load_project_readonly("planning")["episodes"]] == ["古玉藏诀"]
+    assert [episode["title"] for episode in projects.load_project("planning")["episodes"]] == ["古玉藏诀"]
     assert (project_path / "source" / "episode_1.txt").exists()
 
 

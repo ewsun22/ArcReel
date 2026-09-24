@@ -525,6 +525,12 @@ export default {
   'task_type_scene': 'Cảnh',
   'task_type_prop': 'Đạo cụ',
   'task_type_product': 'Hàng hóa',
+  'task_type_character_derivative': 'Nhân vật phái sinh',
+  'task_type_text_episode_plan': 'Lập kế hoạch tập',
+  'task_type_text_episode_script': 'Kịch bản chính thức',
+  'task_type_text_drama_script_plan': 'Kế hoạch kịch bản',
+  'task_type_text_narration_script_plan': 'Kế hoạch kịch bản',
+  'task_type_text_reference_script_plan': 'Kế hoạch kịch bản',
 
   // Agent
   'new_session': 'Phiên mới',
@@ -990,6 +996,7 @@ export default {
   'character_task_failed': 'Tạo nhân vật "{{id}}" thất bại: {{reason}}',
   'scene_task_failed': 'Tạo cảnh "{{id}}" thất bại: {{reason}}',
   'prop_task_failed': 'Tạo đạo cụ "{{id}}" thất bại: {{reason}}',
+  'product_task_failed': 'Tạo sản phẩm "{{id}}" thất bại: {{reason}}',
   'grid_task_failed': 'Tạo phân cảnh đa lưới thất bại: {{reason}}',
   'image_edit_task_failed': 'Chỉnh sửa "{{id}}" thất bại: {{reason}}',
   'task_failed_provider_reason_suffix': ' (Lý do từ nhà cung cấp: {{reason}})',

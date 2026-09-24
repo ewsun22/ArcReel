@@ -532,6 +532,12 @@ export default {
   'task_type_scene': 'Scene',
   'task_type_prop': 'Prop',
   'task_type_product': 'Merchandise',
+  'task_type_character_derivative': 'Character derivative',
+  'task_type_text_episode_plan': 'Episode planning',
+  'task_type_text_episode_script': 'Final script',
+  'task_type_text_drama_script_plan': 'Script plan',
+  'task_type_text_narration_script_plan': 'Script plan',
+  'task_type_text_reference_script_plan': 'Script plan',
 
   // Agent
   'new_session': 'New Session',
@@ -1008,6 +1014,7 @@ export default {
   'character_task_failed': 'Character "{{id}}" generation failed: {{reason}}',
   'scene_task_failed': 'Scene "{{id}}" generation failed: {{reason}}',
   'prop_task_failed': 'Prop "{{id}}" generation failed: {{reason}}',
+  'product_task_failed': 'Product "{{id}}" generation failed: {{reason}}',
   'grid_task_failed': 'Multi-grid storyboard generation failed: {{reason}}',
   'image_edit_task_failed': 'Edit for "{{id}}" failed: {{reason}}',
   'task_failed_provider_reason_suffix': ' (Provider reason: {{reason}})',

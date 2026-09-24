@@ -304,49 +304,6 @@ async def build_managed_with_actor(
     return managed, actor, client
 
 
-from lib.backends.image_backends.base import ImageCapability, ImageGenerationRequest, ImageGenerationResult
-
-
-class FakeImageBackend:
-    """Fake image backend for testing."""
-
-    def __init__(self, *, provider: str = "fake", model: str = "fake-model"):
-        self._provider = provider
-        self._model = model
-
-    @property
-    def name(self) -> str:
-        return self._provider
-
-    @property
-    def model(self) -> str:
-        return self._model
-
-    @property
-    def capabilities(self) -> set[ImageCapability]:
-        return {ImageCapability.TEXT_TO_IMAGE, ImageCapability.IMAGE_TO_IMAGE}
-
-    @property
-    def max_reference_images(self) -> int:
-        # 替身不按数量裁剪参考图，全量随请求发出。
-        return 0
-
-    async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
-        request.output_path.parent.mkdir(parents=True, exist_ok=True)
-        # Minimal valid PNG (1x1 pixel)
-        request.output_path.write_bytes(
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
-            b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
-            b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
-            b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
-        )
-        return ImageGenerationResult(
-            image_path=request.output_path,
-            provider=self._provider,
-            model=self._model,
-        )
-
-
 class FakeReferenceCapabilityProjection:
     """Configurable provider capability adapter for reference projection tests."""
 
@@ -451,7 +408,7 @@ class FakeConfigResolver:
     """能力解析器 seam 的手写替身：按桶回答视频能力，不触碰配置库。
 
     生产侧凡接 ``config_resolver`` 关键字的入口（``ToolContext``、``MediaGenerator``、
-    ``resolve_video_caps`` / ``fetch_video_caps`` 及 ``text_generation`` 的几个取值器）都可注入本类，替代对这些取值器
+    ``resolve_video_caps`` 及 ``text_generation`` 的几个取值器如 ``fetch_video_caps``）都可注入本类，替代对这些取值器
     本身的整体替换——被替换掉的取值器里有软回退、联动约束收窄与声音档派生，那些才是用例要
     保护的行为。
 

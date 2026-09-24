@@ -305,7 +305,7 @@ async def get_generation_batch(
     try:
         resolver: ArtifactCurrencyResolver | None = None
         try:
-            project = await asyncio.to_thread(services.projects.load_project_readonly, scope.project_name)
+            project = await asyncio.to_thread(services.projects.load_project, scope.project_name)
             resolver = active_artifact_currency_resolver(
                 services.projects.get_project_path(scope.project_name),
                 project,
@@ -579,7 +579,7 @@ async def generate_script_plan(
     services: Services,
 ) -> ToolOutcome[Any]:
     try:
-        project = await asyncio.to_thread(services.projects.load_project_readonly, scope.project_name)
+        project = await asyncio.to_thread(services.projects.load_project, scope.project_name)
         content_mode = project.get("content_mode", "narration")
         if content_mode == "ad":
             raise TextGenerationError("广告/短片项目无 script_plan，请直接调用 generate_episode_script")
@@ -830,7 +830,7 @@ def _file_problem(name: str, exc: BaseException) -> ToolProblem:
 
 
 def _get_project_content_sync(project_name: str, projects: ProjectManager) -> ProjectContent:
-    project = projects.load_project_readonly(project_name)
+    project = projects.load_project(project_name)
     return ProjectContent(revision=prefixed_canonical_json_digest(project), project=project)
 
 
@@ -956,7 +956,7 @@ async def get_source_text(
 def _get_script_plan_content_sync(
     project_name: str, episode: int, projects: ProjectManager
 ) -> ScriptPlanContent | None:
-    project = projects.load_project_readonly(project_name)
+    project = projects.load_project(project_name)
     kind = script_plan_kind(project)
     if kind is None:
         return None
@@ -1147,7 +1147,7 @@ async def list_projects(
         result = []
         for name in sorted(services.projects.list_projects()):
             try:
-                project = services.projects.load_project_readonly(name)
+                project = services.projects.load_project(name)
             except (FileNotFoundError, ValueError):
                 continue
             result.append(
@@ -1294,7 +1294,7 @@ async def get_video_capabilities(
     services: Services,
 ) -> ToolOutcome[dict[str, Any]]:
     try:
-        project = await asyncio.to_thread(services.projects.load_project_readonly, scope.project_name)
+        project = await asyncio.to_thread(services.projects.load_project, scope.project_name)
         payload = await services.capabilities.video_capabilities_for_project(project)
         await annotate_reference_unit_tiers(payload, project, config_resolver=services.capabilities)
     except FileNotFoundError as exc:
@@ -1782,6 +1782,8 @@ def _format_plan(result: PlanResult) -> str:
         lines.append(
             f"- 第 {episode.episode} 集《{episode.title}》{status_note}｜体量约 {episode.reading_units}｜钩子：{episode.hook}"
         )
+        lines.append(f"  首句：{episode.first_sentence}")
+        lines.append(f"  尾句：{episode.last_sentence}")
     if result.source_exhausted:
         lines.append("源文已全部规划完毕。")
     elif result.cursor:
@@ -1791,7 +1793,7 @@ def _format_plan(result: PlanResult) -> str:
     else:
         lines.append(f"累计已规划 {result.total_planned} 集。")
     lines.append(
-        "请把以上摘要展示给用户做批级审阅；需要调整时先调用 reset_episode_planning 退回到"
+        "请把以上摘要（含每集首句与尾句原文）展示给用户做批级审阅；需要调整时先调用 reset_episode_planning 退回到"
         "最早受影响的集，再带 instructions 重新调用本工具。"
     )
     return "\n".join(lines)
@@ -1822,6 +1824,8 @@ async def _execute_plan_episodes(
                 "hook": episode.hook,
                 "reading_units": episode.reading_units,
                 "ledger_status": episode.ledger_status,
+                "first_sentence": episode.first_sentence,
+                "last_sentence": episode.last_sentence,
             }
             for episode in result.episodes
         ],

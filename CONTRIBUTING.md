@@ -2,6 +2,8 @@
 
 欢迎贡献代码、报告 Bug 或提出功能建议。
 
+以推广某项商业服务为主要目的的贡献（例如新增某家服务的接入，或在文档中加入服务推荐与链接）不走 PR 流程，这类 PR 会被关闭；合作请联系 support@arc-reel.com。
+
 ## 本地开发环境
 
 ```bash
@@ -158,6 +160,16 @@ pytest `asyncio_mode = "auto"`，异步用例无需手动标记。
 - **目录与体量**：测试文件与源文件同级并放，不使用 `__tests__/` 目录；「一文件一被测对象」、分裂命名禁令与 3000 行熔断三条与后端一致，允许语义化主题后缀（如 `ShotDetail.drama.test.tsx`）。
 - **可测性改造**：不得改变生产行为；允许抽纯函数、抽 hook 级的结构性抽取。
 - **配置与 lint**：`testTimeout` 用 vitest 默认 5s，个别慢用例显式覆写并说明；eslint 启用 vitest、testing-library、jest-dom 插件（`expect-expect` 检出零断言用例）；裸 `toHaveBeenCalled` 不设禁令，断言强度归 review。
+
+### 在 worktree 与沙箱里运行闸门
+
+worktree 里没有 `.venv` 与 `node_modules`，Agent 沙箱可能禁止绑定本地端口。按下面方式运行，闸门结果与主仓一致：
+
+- **Python 共用主仓 `.venv`**：`UV_PROJECT_ENVIRONMENT=<主仓根>/.venv uv run --no-sync <命令>`。`--no-sync` 让 `uv run` 直接使用该环境；缺了它，`uv run` 会按当前 worktree 的 `pyproject.toml` 往该目录同步一份完整依赖，`.claude/settings.json` 的保存后格式化 hook 里的 `uv run ruff` 同样会触发这次同步。worktree 改动了 `pyproject.toml` 或 `uv.lock` 时，主仓 `.venv` 不反映新依赖：省略 `UV_PROJECT_ENVIRONMENT` 与 `--no-sync`，让 `uv run` 在 worktree 里建立并同步自己的 `.venv`，basedpyright 也就不需要 `--venvpath`。
+- **basedpyright 指向主仓**：`pyproject.toml` 的 `venvPath` 让它在当前目录找 `.venv`，worktree 里以退出码 3 报 `venv .venv subdirectory not found`；加 `--venvpath <主仓根>` 即可，无需符号链接。
+- **需要本地端口的用例在允许绑定端口的环境运行**：`tests/integration/agent_runtime_profile/test_custom_endpoint_adapter_skill.py` 启动本地 HTTP 服务，沙箱禁止绑定 `127.0.0.1` 时以 `PermissionError` 失败。后端完整测试直接在允许本地端口的环境运行一次，省去沙箱内先跑一遍再复跑。
+- **并发跑前端闸门时限制 worker**：多个 Agent 同时运行 `pnpm check` 会让 vitest 默认 worker 数把机器压到用例超时；用 `pnpm check --maxWorkers=2`，参数落到脚本末尾的 `vitest run`。
+- **前端与文档站各自安装依赖**：在 worktree 的 `frontend/` 与 `website/` 分别执行 `pnpm install --frozen-lockfile`。
 
 ## 代码质量
 

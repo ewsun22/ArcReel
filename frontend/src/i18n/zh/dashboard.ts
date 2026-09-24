@@ -531,6 +531,12 @@ export default {
   'task_type_scene': '场景',
   'task_type_prop': '道具',
   'task_type_product': '商品',
+  'task_type_character_derivative': '角色衍生',
+  'task_type_text_episode_plan': '分集规划',
+  'task_type_text_episode_script': '正式脚本',
+  'task_type_text_drama_script_plan': '脚本规划',
+  'task_type_text_narration_script_plan': '脚本规划',
+  'task_type_text_reference_script_plan': '脚本规划',
 
   // Agent
   'new_session': '新会话',
@@ -1007,6 +1013,7 @@ export default {
   'character_task_failed': '角色 "{{id}}" 生成失败：{{reason}}',
   'scene_task_failed': '场景 "{{id}}" 生成失败：{{reason}}',
   'prop_task_failed': '道具 "{{id}}" 生成失败：{{reason}}',
+  'product_task_failed': '商品 "{{id}}" 生成失败：{{reason}}',
   'grid_task_failed': '多宫格分镜生成失败：{{reason}}',
   'image_edit_task_failed': '"{{id}}" 编辑失败：{{reason}}',
   'task_failed_provider_reason_suffix': '（供应商拒因：{{reason}}）',

@@ -7,7 +7,7 @@ import { useActiveResourceIds, useLatestTasksByResource, useTasksStore } from "@
 import { useAppStore } from "@/stores/app-store";
 import { useCostStore } from "@/stores/cost-store";
 import { API } from "@/api";
-import type { ReferenceDurationPrecheck, ReferenceVideoUnit } from "@/types";
+import type { ReferenceDurationPrecheck, ReferenceVideoUnit, UnitGeneratedAssets } from "@/types";
 import type { ProjectData } from "@/types";
 
 // useActiveResourceIds / useLatestTasksByResource 默认包裹真实实现，仅在个别用例里
@@ -29,7 +29,7 @@ vi.mock("@/stores/tasks-store", async () => {
   };
 });
 
-function mkUnit(id: string, text = "x"): ReferenceVideoUnit {
+function mkUnit(id: string, text = "x"): ReferenceVideoUnit & { generated_assets: UnitGeneratedAssets } {
   return {
     unit_id: id,
     text,
@@ -124,6 +124,16 @@ describe("ReferenceVideoCanvas", () => {
 
   it("loads units on mount and renders the list", async () => {
     vi.spyOn(API, "listReferenceVideoUnits").mockResolvedValue({ units: [mkUnit("E1U1"), mkUnit("E1U2")] });
+    render(<ReferenceVideoCanvas projectName="proj" episode={1} />);
+    await waitFor(() => expect(screen.getByTestId("unit-row-E1U1")).toBeInTheDocument());
+    expect(screen.getByTestId("unit-row-E1U2")).toBeInTheDocument();
+  });
+
+  it("renders units that carry no generated_assets section at all", async () => {
+    // 后端只在生成时写入这一节：尚未生成过任何产物的单元没有它，读侧一律按可能缺席处理。
+    const bare: ReferenceVideoUnit = mkUnit("E1U1");
+    delete bare.generated_assets;
+    vi.spyOn(API, "listReferenceVideoUnits").mockResolvedValue({ units: [bare, mkUnit("E1U2")] });
     render(<ReferenceVideoCanvas projectName="proj" episode={1} />);
     await waitFor(() => expect(screen.getByTestId("unit-row-E1U1")).toBeInTheDocument());
     expect(screen.getByTestId("unit-row-E1U2")).toBeInTheDocument();
@@ -495,6 +505,15 @@ describe("ReferenceVideoCanvas", () => {
       name: /Duration|时长/,
     })) as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.value)).toEqual(["3", "4", "8"]);
+  });
+
+  // 项目没配可用的 i2v 桶时服务端给不出无参考图单元的档位（该字段为 null）：控件降级为只读，
+  // 而不是回落到 r2v 那份带参考图约束的档位——那会让这些单元以为自己能选一个执行期不成立的秒数。
+  it("shows a read-only duration for a no-reference unit when the no-reference tiers are unknown", async () => {
+    vi.spyOn(API, "listReferenceVideoUnits").mockResolvedValue({ units: [mkUnit("E1U1")] });
+    render(<ReferenceVideoCanvas projectName="proj" episode={1} durationOptions={[8]} />);
+    expect((await screen.findAllByText("3s")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("combobox", { name: /Duration|时长/ })).not.toBeInTheDocument();
   });
 
   it("offers the reference-narrowed tier set for a unit whose body mentions an asset", async () => {

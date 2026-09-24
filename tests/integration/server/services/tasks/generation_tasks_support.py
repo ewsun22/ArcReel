@@ -136,7 +136,7 @@ class _FakePM:
                     "description": "不锈钢保温杯",
                     "product_sheet": "",
                     "brand": "",
-                    "reference_images": ["products/refs/保温杯_1.jpg", "products/refs/missing.jpg"],
+                    "reference_images": ["products/refs/保温杯_1.jpg"],
                     "selling_points": [],
                 }
             },
@@ -260,10 +260,6 @@ class FakeGenerator:
         self.versions = self
         self.current_versions = {}
 
-    def generate_image(self, **kwargs):
-        self.image_calls.append(kwargs)
-        return Path("/tmp/image.png"), 1
-
     async def generate_image_async(self, **kwargs):
         self.image_calls.append(kwargs)
         self._materialize_image(kwargs["resource_type"], kwargs["resource_id"])
@@ -273,8 +269,16 @@ class FakeGenerator:
                 for reference in kwargs.get("reference_images") or []
             ]
         )
-        self.current_versions[(kwargs["resource_type"], kwargs["resource_id"])] = 1
-        return Path("/tmp/image.png"), 1
+        # 与 MediaGenerator 一样经 formal_output 的活化回调提交版本，返回回调给出的版本号
+        current = Path("/tmp/image.png")
+        version = kwargs["commit_formal_output"](current, current, {})
+        return current, version
+
+    def commit_staged_version(self, resource_type, resource_id, prompt, *, on_commit=None, **_kwargs):
+        self.current_versions[(resource_type, resource_id)] = 1
+        if on_commit is not None:
+            on_commit()
+        return 1
 
     def _materialize_image(self, resource_type: str, resource_id: str) -> None:
         if self.project_path is None:
@@ -284,10 +288,6 @@ class FakeGenerator:
         target = self.project_path / resource_relative_path(resource_type, resource_id)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"png")
-
-    def generate_video(self, **kwargs):
-        self.video_calls.append(kwargs)
-        return Path("/tmp/video.mp4"), 2, "ref", "uri"
 
     async def generate_video_async(self, **kwargs):
         self.video_calls.append(kwargs)
