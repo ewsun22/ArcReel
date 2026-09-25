@@ -1,4 +1,4 @@
-from typing import ClassVar, cast
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -8,8 +8,6 @@ from lib.config.resolver import (
     VideoBucketCapabilityError,
     VideoGenerationType,
     caps_generation_mode,
-    constrain_durations_for_project,
-    resolve_raw_supported_durations,
     video_bucket_for_generation_mode,
 )
 from lib.config.service import ProviderStatus
@@ -474,8 +472,8 @@ class TestVideoCapabilitiesBucketing:
             await _video_caps(db_factory, {"video_backend": "minimax/S2V-01", "generation_mode": "storyboard"})
         assert excinfo.value.code == "video_capability_missing_i2v"
 
-    async def test_duration_constraints_evaluate_on_bucket_model(self, db_factory):
-        """时长收窄按桶生效模型求值：参考生视频项目落 r2v 桶模型声明的「参考图↔时长」约束。"""
+    async def test_reference_project_reads_the_r2v_bucket_model(self, db_factory):
+        """参考生视频项目的能力取 r2v 桶生效模型的声明。"""
         project = {
             "video_provider_i2v": "kling/kling-v3",
             "video_provider_r2v": "gemini-aistudio/veo-3.1-generate-preview",
@@ -484,14 +482,6 @@ class TestVideoCapabilitiesBucketing:
         caps = await _video_caps(db_factory, project)
         assert caps["model"] == "veo-3.1-generate-preview"
         assert caps["supported_durations"] == [4, 6, 8]
-        constrained = constrain_durations_for_project(
-            project,
-            list(caps["supported_durations"]),
-            provider_id=caps["provider_id"],
-            model_id=caps["model"],
-            generation_mode="reference_video",
-        )
-        assert constrained == [8]
 
     async def test_max_reference_images_follows_backend_declaration(self, db_factory):
         """viduq3-pro 不在 /reference2video 白名单：能力查询报 0，不报 registry 的并行声明。"""
@@ -534,66 +524,6 @@ class TestVideoCapabilities:
         assert caps["max_duration"] == 8
         # max_reference_images 来源：backend 的 VideoCapabilities 声明（与执行层同源）
         assert caps["max_reference_images"] == 3
-
-    async def test_duration_constraints_follow_saved_resolution(self, db_factory):
-        """缺省上下文按项目已保存档位收窄；supported_durations 仍是全集。"""
-        resolver = ConfigResolver.__new__(ConfigResolver)
-        fake_svc = _FakeConfigService(settings={})
-        async with db_factory() as session:
-            with patch("lib.config.resolver.get_project_manager") as mock_pm:
-                mock_pm.return_value.load_project.return_value = {
-                    "video_backend": "gemini-aistudio/veo-3.1-generate-preview",
-                    "model_settings": {"gemini-aistudio/veo-3.1-generate-preview": {"resolution": "1080p"}},
-                }
-                caps = await resolver._resolve_video_capabilities(fake_svc, session, "demo")
-        assert caps["supported_durations"] == [4, 6, 8]
-        assert caps["duration_constraints"] == {
-            "resolution": "1080p",
-            "uses_reference_images": False,
-            "allowed": [8],
-            "allowed_without_reference_images": [8],
-            "excluded": {4: "resolution", 6: "resolution"},
-        }
-
-    async def test_duration_constraints_reference_mode_uses_provider_fallback(self, db_factory):
-        """参考生视频项目未选档位：按执行期真正下发的供应商兜底档位求值，与 constrain_durations_for_project 同口径。"""
-        resolver = ConfigResolver.__new__(ConfigResolver)
-        fake_svc = _FakeConfigService(settings={})
-        async with db_factory() as session:
-            with patch("lib.config.resolver.get_project_manager") as mock_pm:
-                mock_pm.return_value.load_project.return_value = {
-                    "video_backend": "gemini-aistudio/veo-3.1-generate-preview",
-                    "generation_mode": "reference_video",
-                }
-                caps = await resolver._resolve_video_capabilities(fake_svc, session, "demo")
-        constraints = caps["duration_constraints"]
-        assert constraints["resolution"] == "1080p"
-        assert constraints["uses_reference_images"] is True
-        assert constraints["allowed"] == [8]
-        assert constraints["excluded"] == {4: "reference", 6: "reference"}
-
-    async def test_duration_constraints_explicit_context_overrides_project(self, db_factory):
-        """显式上下文（表单里未保存的值）覆盖项目已保存档位；空串分辨率表示「自动」而非回退。"""
-        resolver = ConfigResolver(db_factory)
-        project = {
-            "video_backend": "gemini-aistudio/veo-3.1-generate-preview",
-            "model_settings": {"gemini-aistudio/veo-3.1-generate-preview": {"resolution": "1080p"}},
-        }
-        caps = await resolver.video_capabilities_for_model(
-            "gemini-aistudio", "veo-3.1-generate-preview", project, resolution="720p", uses_reference_images=False
-        )
-        assert caps["duration_constraints"]["allowed"] == [4, 6, 8]
-        caps = await resolver.video_capabilities_for_model(
-            "gemini-aistudio", "veo-3.1-generate-preview", project, resolution="", uses_reference_images=False
-        )
-        assert caps["duration_constraints"]["resolution"] is None
-        assert caps["duration_constraints"]["allowed"] == [4, 6, 8]
-        # 无项目（创建向导）：参考图路径同样补供应商兜底档位
-        caps = await resolver.video_capabilities_for_model(
-            "gemini-aistudio", "veo-3.1-generate-preview", None, uses_reference_images=True
-        )
-        assert caps["duration_constraints"]["resolution"] == "1080p"
-        assert caps["duration_constraints"]["allowed_without_reference_images"] == [8]
 
     async def test_reads_project_default_duration_and_modes(self, db_factory):
         resolver = ConfigResolver.__new__(ConfigResolver)
@@ -802,7 +732,6 @@ class TestVideoCapabilities:
 
         assert caps["supported_durations"] == []
         assert caps["max_duration"] == 0
-        assert caps["duration_constraints"]["allowed"] == []
         # 这一位把「这一维由端点固定」与「档位声明缺失」分开，剧本规划据它借篇幅依据而不是报错。
         assert caps["duration_endpoint_fixed"] is True
         # 能力位照常由绑定推导，与时长这一维互不牵连。
@@ -2007,124 +1936,13 @@ class TestProjectGenerationModeCaps:
             "voice_consistency"
         ] == "soft"
 
-    async def test_uses_reference_images_constraint_follows_project_route(self, db_factory):
-        """caps 的 generation_mode 是下游时长约束的入参，参考生视频据此施加「参考图↔时长」约束。"""
+    async def test_generation_mode_follows_project_route(self, db_factory):
+        """caps 的 generation_mode 与能力位跟随项目路线：参考生视频读 r2v 桶模型。"""
         caps = await _video_caps(
             db_factory, {"generation_mode": "reference_video", "video_provider_r2v": "minimax/S2V-01"}
         )
         assert caps["generation_mode"] == "reference_video"
         assert caps["max_reference_images"] == 1
-
-
-class TestNoReferenceBucketDurations:
-    """参考生视频的 ``allowed_without_reference_images`` 由 i2v 桶模型自己解析。
-
-    无参考图的视频单元执行时落 i2v 桶（``lib.script.reference_video.units.reference_video_bucket``），
-    与 r2v 桶可以是两个模型：同分辨率下把 r2v 模型的参考图约束摘掉，只在两桶同模型时才碰巧
-    是这些单元能选的档位。
-    """
-
-    VEO = "gemini-aistudio/veo-3.1-generate-preview"
-    SEEDANCE = "ark/doubao-seedance-2-0-260128"
-
-    async def test_i2v_bucket_model_drives_the_no_reference_tiers(self, db_factory):
-        """两桶配成不同模型时，该字段是 i2v 桶模型的收窄结果，不是 r2v 模型摘掉参考图约束的那份。"""
-        caps = await _video_caps(
-            db_factory,
-            {
-                "generation_mode": "reference_video",
-                "video_provider_r2v": self.VEO,
-                "video_provider_i2v": self.SEEDANCE,
-            },
-        )
-        assert caps["model"] == "veo-3.1-generate-preview"
-        assert caps["supported_durations"] == [4, 6, 8]
-        constraints = caps["duration_constraints"]
-        # r2v 路径：参考图约束 + 供应商兜底分辨率，veo 只剩 8 秒。
-        assert constraints["allowed"] == [8]
-        # 无参考图单元按 seedance 的 i2v 档位全集走，与 veo 的 8 秒无关。
-        assert constraints["allowed_without_reference_images"] == list(range(4, 16))
-
-    async def test_same_model_both_buckets_matches_a_standalone_i2v_query(self, db_factory):
-        """两桶同模型时，该字段与单独按 i2v 桶查一次得到的 ``allowed`` 逐项相等。"""
-        project = {
-            "generation_mode": "reference_video",
-            "video_provider_r2v": self.VEO,
-            "video_provider_i2v": self.VEO,
-            "model_settings": {self.VEO: {"resolution": "1080p"}},
-        }
-        caps = await _video_caps(db_factory, project)
-        i2v_only = await _video_caps(db_factory, project, generation_type="i2v")
-        assert (
-            caps["duration_constraints"]["allowed_without_reference_images"]
-            == i2v_only["duration_constraints"]["allowed"]
-        )
-
-    async def test_unsaved_resolution_uses_the_provider_fallback_like_execution(self, db_factory):
-        """项目没存分辨率时按供应商兜底档位求值：参考生视频的请求投影对 i2v 桶同样下发兜底档位。
-
-        Veo 兜底为 1080p，该档位只接受 8 秒；按「不传分辨率」求值会放出执行期必被拒的 4 / 6 秒。
-        """
-        caps = await _video_caps(
-            db_factory,
-            {
-                "generation_mode": "reference_video",
-                "video_provider_r2v": self.VEO,
-                "video_provider_i2v": self.VEO,
-            },
-        )
-        assert caps["duration_constraints"]["allowed_without_reference_images"] == [8]
-
-    async def test_project_without_a_usable_i2v_bucket_reports_unknown(self, db_factory):
-        """项目没配可用的 i2v 桶（S2V-01 只吃参考图，无首帧能力）时该字段为 None，其余能力照常返回。
-
-        回退到 r2v 模型摘掉参考图约束的结果等于把一份落差一个约束的档位表谎报成这些单元能选的
-        档位；让整份能力应答失败则会把时长、首尾帧、声音一致性随这一个字段一起丢掉。
-        """
-        caps = await _video_caps(
-            db_factory, {"generation_mode": "reference_video", "video_provider_r2v": "minimax/S2V-01"}
-        )
-        assert caps["model"] == "S2V-01"
-        assert caps["duration_constraints"]["allowed_without_reference_images"] is None
-
-    async def test_storyboard_project_keeps_the_same_model_result(self, db_factory):
-        """分镜项目的主桶就是 i2v，该字段仍是同一模型摘掉参考图约束的结果。"""
-        caps = await _video_caps(db_factory, {"video_backend": self.SEEDANCE})
-        constraints = caps["duration_constraints"]
-        assert constraints["allowed"] == list(range(4, 16))
-        assert constraints["allowed_without_reference_images"] == list(range(4, 16))
-
-
-class TestResolveRawSupportedDurations:
-    """收窄前的时长全集：caps → registry 两级解析。"""
-
-    _VEO_PROJECT: ClassVar[dict[str, str]] = {"video_backend": "gemini-aistudio/veo-3.1-generate-preview"}
-
-    def test_caps_take_precedence_over_registry(self):
-        """caps 是 DB 驱动的当下真相，压过 project.json 自报身份查到的静态声明。"""
-        caps = {"supported_durations": [5, 10]}
-        assert resolve_raw_supported_durations(dict(self._VEO_PROJECT), caps) == [5, 10]
-
-    def test_falls_back_to_registry_identity_without_caps(self):
-        assert resolve_raw_supported_durations(dict(self._VEO_PROJECT)) == [4, 6, 8]
-
-    def test_custom_provider_resolves_only_through_caps(self):
-        """``custom-`` 前缀不在 registry：不带 caps 时无从解析，带 caps 时取 caps 的档位表。
-
-        这条是内容确认必须先解析 caps 的原因——同步两级链对自定义供应商恒为 None。
-        """
-        project = {"video_backend": "custom-7/acme-video"}
-        assert resolve_raw_supported_durations(project) is None
-        assert resolve_raw_supported_durations(project, {"supported_durations": [5, 10]}) == [5, 10]
-
-    def test_project_json_duration_field_is_not_a_source(self):
-        """project.json 不是档位来源：无生产写入者的字段不得再被当作一级回退读取，
-        否则伪造 / 陈旧的项目字段会盖过 registry 的真实声明。"""
-        project = dict(self._VEO_PROJECT) | {"_supported_durations": [99]}
-        assert resolve_raw_supported_durations(project) == [4, 6, 8]
-
-    def test_none_when_no_resolvable_model(self):
-        assert resolve_raw_supported_durations({}) is None
 
 
 class TestPayloadPinnedVideoModel:

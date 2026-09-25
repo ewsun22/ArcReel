@@ -56,6 +56,7 @@ from lib.episode.episode_target_duration import (
 )
 from lib.infra.app_data_dir import app_data_dir
 from lib.infra.content_digest import canonical_json_digest
+from lib.infra.data_root_layout import PROJECT_FILENAME, PROJECT_NAME_PATTERN, DataRootLayout, list_project_dirs
 from lib.infra.json_io import atomic_write_bytes, atomic_write_json, load_json, load_json_or_none
 from lib.infra.path_safety import PathTraversalError, safe_join
 from lib.infra.schema_guards import is_int, is_shape, is_str
@@ -93,7 +94,6 @@ from lib.speech.audio_utils import discard_stale_reference_audio, resolve_audio_
 
 logger = logging.getLogger(__name__)
 
-PROJECT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 PROJECT_SLUG_SANITIZER = re.compile(r"[^a-zA-Z0-9]+")
 
 # 生成模式（generation_mode）：二值必填，创建即定、之后不可变（可变性由 PATCH 模型结构保证）。
@@ -319,7 +319,7 @@ class ProjectManager:
     ]
 
     # 项目元数据文件名
-    PROJECT_FILE = "project.json"
+    PROJECT_FILE = PROJECT_FILENAME
 
     @staticmethod
     def normalize_project_name(name: str) -> str:
@@ -353,27 +353,17 @@ class ProjectManager:
         prefix = self._slugify_project_title(title or "")
         while True:
             candidate = f"{prefix}-{secrets.token_hex(4)}"
-            if not (self.projects_root / candidate).exists():
+            if not (self.projects_dir / candidate).exists():
                 return candidate
 
     @classmethod
-    def from_cwd(cls) -> tuple["ProjectManager", str]:
-        """从当前工作目录推断 ProjectManager 和项目名称。
-
-        假定 cwd 为 ``projects/{project_name}/`` 格式。
-        返回 ``(ProjectManager, project_name)`` 元组。
-        """
-        cwd = Path.cwd().resolve()
-        project_name = cwd.name
-        projects_root = cwd.parent
-        pm = cls(projects_root)
-        if not (projects_root / project_name / cls.PROJECT_FILE).exists():
-            raise FileNotFoundError(f"当前目录不是有效的项目目录: {cwd}")
-        return pm, project_name
+    def for_project_dir(cls, project_dir: str | Path) -> "ProjectManager":
+        """由一个项目目录构造其所在数据根的 ProjectManager（数据根经布局模块推导）。"""
+        return cls(DataRootLayout.for_project_dir(Path(project_dir)).root)
 
     def __init__(
         self,
-        projects_root: str | Path | None = None,
+        data_root: str | Path,
         *,
         script_reader: Callable[[Path], dict] | None = None,
         script_writer: Callable[[Path, dict], None] | None = None,
@@ -382,26 +372,24 @@ class ProjectManager:
         初始化项目管理器
 
         Args:
-            projects_root: 项目根目录，默认为当前目录下的 projects/
+            data_root: 数据根；项目目录等位置由数据根布局给出
             script_reader: 剧本 JSON 读取 seam；缺省时从文件系统读取。
             script_writer: 剧本 JSON 原子写入 seam；缺省时使用 atomic_write_json。
         """
-        if projects_root is None:
-            # 尝试从环境变量或默认路径获取
-            projects_root = os.environ.get("AI_ANIME_PROJECTS", "projects")
-
-        self.projects_root = Path(projects_root)
-        self.projects_root.mkdir(parents=True, exist_ok=True)
+        self.layout = DataRootLayout(Path(data_root))
+        self.data_root = self.layout.root
+        self.projects_dir = self.layout.projects_dir
+        self.projects_dir.mkdir(parents=True, exist_ok=True)
         self._script_reader = script_reader
         self._script_writer = script_writer
 
     def list_projects(self) -> list[str]:
-        """列出所有项目"""
-        return [d.name for d in self.projects_root.iterdir() if d.is_dir() and not d.name.startswith((".", "_"))]
+        """列出所有项目（判定见 ``list_project_dirs``）。"""
+        return [d.name for d in list_project_dirs(self.projects_dir)]
 
     def get_global_assets_root(self) -> Path:
         """返回全局资产根目录，并确保 character/scene/prop 子目录存在。"""
-        root = self.projects_root / "_global_assets"
+        root = self.layout.global_assets_dir
         root.mkdir(parents=True, exist_ok=True)
         for sub in ("character", "scene", "prop"):
             (root / sub).mkdir(exist_ok=True)
@@ -426,7 +414,7 @@ class ProjectManager:
             项目目录路径
         """
         name = self.normalize_project_name(name)
-        project_dir = self.projects_root / name
+        project_dir = self.projects_dir / name
 
         try:
             project_dir.mkdir()
@@ -564,8 +552,6 @@ class ProjectManager:
             "failed_projects": 0,
             "aborted": False,
         }
-        if not self.projects_root.exists():
-            return totals
         _STAT_KEYS_TO_AGGREGATE = (
             "created",
             "repaired",
@@ -582,12 +568,7 @@ class ProjectManager:
             "collision",
             "migrated_total",
         )
-        for project_dir in sorted(self.projects_root.iterdir()):
-            # 与 ``list_projects`` 同规则：跳过点开头（.git 等）和下划线开头
-            # （``_global_assets`` 保留目录 — 跨项目共享 character/scene/prop 库，
-            # 不是项目，不应物化 Agent profile）
-            if not project_dir.is_dir() or project_dir.name.startswith((".", "_")):
-                continue
+        for project_dir in list_project_dirs(self.projects_dir):
             try:
                 result = self.sync_agent_profile(project_dir)
                 for key in _STAT_KEYS_TO_AGGREGATE:
@@ -612,7 +593,7 @@ class ProjectManager:
         """获取项目路径（含路径遍历防护）"""
         name = self.normalize_project_name(name)
         try:
-            project_dir = safe_join(self.projects_root, name)
+            project_dir = safe_join(self.projects_dir, name)
         except PathTraversalError as exc:
             raise ValueError(f"非法项目名称: '{name}'") from exc
         if not project_dir.exists():
@@ -2678,7 +2659,7 @@ class ProjectManager:
         noop: list[str] = []
 
         def _mutate(project: dict) -> None:
-            validator = DataValidator(str(self.projects_root))
+            validator = DataValidator(str(self.projects_dir))
             before_errors = set(validator.validate_project_payload(project).errors)  # 改前快照
             bucket = project.setdefault(spec.bucket_key, {})
             if not isinstance(bucket, dict):
@@ -2989,7 +2970,7 @@ class ProjectManager:
 
             # project.json 变更先在副本上应用并做「不更坏」校验：校验失败整体拒绝、任何一处不落盘。
             mutated = copy.deepcopy(project)
-            validator = DataValidator(str(self.projects_root))
+            validator = DataValidator(str(self.projects_dir))
             before_errors = _rename_agnostic_errors(validator.validate_project_payload(mutated), old_key, new_clean)
             entry = rekey_equivalent_entries(mutated[spec.bucket_key], old_key, new_clean)
             if isinstance(entry, dict):
@@ -3792,3 +3773,9 @@ def get_project_manager() -> ProjectManager:
     if _project_manager is None:
         _project_manager = ProjectManager(app_data_dir())
     return _project_manager
+
+
+def reset_project_manager_for_tests() -> None:
+    """清掉 :func:`get_project_manager` 的单例，下次调用按当前数据根重建。"""
+    global _project_manager
+    _project_manager = None

@@ -50,13 +50,18 @@ from lib.artifacts.visual_artifact_provenance import (
 )
 from lib.backends.video_backend_contract import VideoCapabilityError
 from lib.config.registry import PROVIDER_REGISTRY
-from lib.config.resolver import constrain_durations, video_bucket_for_generation_mode
+from lib.config.resolver import video_bucket_for_generation_mode
 from lib.config.service import DEFAULT_VIDEO_POLL_TIMEOUT_SECONDS
 from lib.db.base import DEFAULT_USER_ID
 from lib.generation.generation_queue import (
     DispatchProviderChanged,
     get_generation_queue,
     without_video_execution_identity,
+)
+from lib.generation.video_request_facts import (
+    VideoRequestFactsError,
+    audio_switch_conflict,
+    require_video_request_facts,
 )
 from lib.infra.api_errors import ConflictError
 from lib.infra.async_thread import EventLoopBridge, run_noninterruptible_sync
@@ -81,7 +86,6 @@ from lib.project.resource_paths import CHARACTER_DERIVATIVE_RESOURCE_TYPE, resou
 from lib.prompts.prompt_style import normalize_style_value
 from lib.prompts.prompt_utils import render_storyboard_video_prompt
 from lib.prompts.reference_image_numbering import clamp_reference_images
-from lib.script.reference_video.duration_slots import DEFAULT_PLANNED_DURATION_SECONDS
 from lib.script.reference_video.execution_checkpoint import (
     NarrationExecutionFacts,
     ProviderMediaInput,
@@ -148,6 +152,7 @@ from server.services.tasks.narration_delivery_tasks import (
     active_narrated_video_resource_ids,
     current_selected_video_tier,
     reuse_current_video_for_tier,
+    storyboard_planning_duration,
     tts_task_in_progress,
 )
 from server.services.tasks.reference_video_tasks import execute_reference_video_task
@@ -170,8 +175,8 @@ def assert_duration_supported(duration: int | float | str, supported_durations: 
     """执行层能力守卫：duration 必须落在已解析 model 的 supported_durations 内。
 
     这是 `duration ↔ supported_durations` 唯一的权威校验家——provider 在执行时才解析
-    （见 ADR-0001），故能力校验只能坐在 provider 解析之后。``supported_durations`` 为空时
-    放行（能力不可解析，不更坏：不拒绝一个校验层判断不了的 duration）。
+    （见 ADR-0001），故能力校验只能坐在 provider 解析之后。``supported_durations`` 为空只在
+    时长由端点固定时出现（``docs/adr/0082``），此时放行：能力解析不出已在取事实时阻断。
 
     duration 可能来自外部配置（payload / project.json），故安全解析字符串 / 浮点：
     可解析为整数秒（如 ``"6"`` / ``6.0``）的归一化后比较；非整数秒（如 ``4.5``）一律
@@ -1085,7 +1090,10 @@ async def execute_video_task(
         execution_payload,
         project=project,
         user_id=user_id,
-        video=VideoLaneRequest(generation_type=video_bucket_for_generation_mode(project.get("generation_mode"))),
+        video=VideoLaneRequest(
+            generation_type=video_bucket_for_generation_mode(project.get("generation_mode")),
+            route="storyboard",
+        ),
         audio=AudioLaneRequest() if delivery_options.narration_delivery == USE_TTS else None,
     )
     generator = ctx.generator
@@ -1095,9 +1103,15 @@ async def execute_video_task(
             claimed_provider_id=claimed_provider_id,
             actual_provider_id=registry_provider_id,
         )
+    if ctx.video.request_facts is None:
+        raise RuntimeError("storyboard video lane is missing its request facts")
+    request_facts = require_video_request_facts(ctx.video.request_facts)
+    if (conflict := audio_switch_conflict(request_facts)) is not None:
+        raise VideoRequestFactsError(conflict)
+    requested_generate_audio = request_facts.requested_generate_audio
     model_name = ctx.video.backend_model
-    supported_durations: list[int] = list(ctx.video.supported_durations)
-    resolution = ctx.video.resolution
+    supported_durations = list(request_facts.allowed_durations)
+    resolution = request_facts.resolution
 
     artifact_episode = script_input.episode
     formal_input_claims: list[ArtifactInputClaim] = [script_input.claim]
@@ -1124,7 +1138,7 @@ async def execute_video_task(
             model_id=model_name,
             resolution=resolution,
             seed=seed,
-            requested_generate_audio=ctx.video.requested_generate_audio,
+            requested_generate_audio=requested_generate_audio,
             content_mode=content_mode,
             utterances=item.get("utterances") if content_mode == "drama" else None,
             has_utterances=content_mode == "drama" and "utterances" in item,
@@ -1155,9 +1169,8 @@ async def execute_video_task(
     # provider / model / 能力 / 分辨率均取自单次解析的 video lane：能力按 backend 实际身份
     # （registry provider_id + backend.model）查询，与实际要调用的 model 对齐——历史任务 payload
     # 携带 provider 覆盖、或自定义供应商目标 model 被禁用回退时，二者一致避免 duration 守卫误判
-    # （用「项目默认 model 的能力」误判「实际调用的 model」）。能力不可解析时 supported_durations
-    # 留空，守卫遇空列表放行（不更坏，见 ADR-0002）。解析/构造失败已在 resolve_generation_context
-    # 内原样上抛整次任务失败，不再有硬编码 provider/model 静默兜底。
+    # （用「项目默认 model 的能力」误判「实际调用的 model」）。解析/构造失败已在
+    # resolve_generation_context 内原样上抛整次任务失败。
     # duration 解析收口于执行层：payload > project.default_duration > caps 默认。
     # 用 ``is not None`` 而非 ``or`` 取 payload 值，避免显式 falsy 值被当作未设置。
     duration_seconds = (
@@ -1168,47 +1181,25 @@ async def execute_video_task(
     if duration_seconds is None:
         duration_seconds = project.get("default_duration")
     if not duration_seconds:
-        # 取首项前先按当前分辨率的联动约束收窄：否则 Veo + 1080p/4k 的默认（Auto）设置会取到
-        # 4 秒，被 backend 的「该分辨率必须 8 秒」拒绝——UI 已按同一份声明门控，此处不收窄
-        # 就等于默认配置必然失败。显式指定的时长不经此收窄，其合法性由 assert_duration_supported
-        # 与 backend 的执行期校验把关。
-        candidates = constrain_durations(registry_provider_id, model_name, supported_durations, resolution=resolution)
-        duration_seconds = (
-            candidates[0] if candidates else _get_model_default_duration(registry_provider_id, model_name)
-        )
+        if request_facts.allowed_durations:
+            duration_seconds = request_facts.allowed_durations[0]
+        elif request_facts.duration_endpoint_fixed:
+            # 端点固定没有档位可借：与 use_tts 路径取同一个规划基准，两条路径的申请秒数一致。
+            duration_seconds = storyboard_planning_duration(request_facts, declared=None, project=project)
+        else:
+            duration_seconds = _get_model_default_duration(registry_provider_id, model_name)
 
     delivery_projection = None
     if delivery_options.narration_delivery == USE_TTS:
         episode = artifact_episode
-        current_planned_duration = item.get("duration_seconds") if isinstance(item, dict) else None
-        if (
-            not isinstance(current_planned_duration, int)
-            or isinstance(current_planned_duration, bool)
-            or current_planned_duration <= 0
-        ):
-            current_planned_duration = project.get("default_duration")
-        if (
-            not isinstance(current_planned_duration, int)
-            or isinstance(current_planned_duration, bool)
-            or current_planned_duration <= 0
-        ):
-            candidates = constrain_durations(
-                registry_provider_id,
-                model_name,
-                supported_durations,
-                resolution=resolution,
-            )
-            if not candidates and not ctx.video.duration_endpoint_fixed:
-                raise ValueError("TTS video request requires a current integer planned duration")
-            # 时长由端点固定的模型行没有档位可借（合法空集），退到共享的规划篇幅默认值：这次
-            # 请求随后由公共投影判为 tts_duration_endpoint_fixed，而不是死在缺少规划秒数上。
-            current_planned_duration = next(iter(candidates), DEFAULT_PLANNED_DURATION_SECONDS)
-        constrained_durations = constrain_durations(
-            registry_provider_id,
-            model_name,
-            supported_durations,
-            resolution=resolution,
+        # 档位与端点固定取自执行侧视频请求事实，与预检只差身份来源。
+        assert request_facts is not None
+        current_planned_duration = storyboard_planning_duration(
+            request_facts,
+            declared=item.get("duration_seconds") if isinstance(item, dict) else None,
+            project=project,
         )
+        constrained_durations = list(request_facts.allowed_durations)
         delivery_projection = await prepare_current_narrated_video_duration(
             project=project,
             episode=episode,
@@ -1218,7 +1209,7 @@ async def execute_video_task(
             planned_duration_seconds=current_planned_duration,
             supported_durations=constrained_durations,
             confirmed_request_duration_seconds=delivery_options.confirmed_request_duration_seconds,
-            duration_endpoint_fixed=ctx.video.duration_endpoint_fixed,
+            duration_endpoint_fixed=request_facts.duration_endpoint_fixed,
             resolver=ResolvedTtsSettingsResolver.from_audio_lane(ctx.audio),
             tts_in_progress=await tts_task_in_progress(
                 project_name=project_name,
@@ -1245,7 +1236,7 @@ async def execute_video_task(
             planned_duration_seconds=current_planned_duration,
             supported_durations=constrained_durations,
             confirmed_request_duration_seconds=delivery_options.confirmed_request_duration_seconds,
-            duration_endpoint_fixed=ctx.video.duration_endpoint_fixed,
+            duration_endpoint_fixed=request_facts.duration_endpoint_fixed,
             current_visual_duration_seconds=current_visual_duration,
         )
         if not delivery_projection.allowed:
@@ -1302,12 +1293,7 @@ async def execute_video_task(
             sorted(
                 {
                     duration_seconds,
-                    *constrain_durations(
-                        registry_provider_id,
-                        model_name,
-                        supported_durations,
-                        resolution=resolution,
-                    ),
+                    *request_facts.allowed_durations,
                 }
             )
         )
@@ -1404,7 +1390,7 @@ async def execute_video_task(
                     duration_seconds=duration_seconds,
                     aspect_ratio=aspect_ratio,
                     resolution=resolution,
-                    generate_audio=ctx.video.requested_generate_audio,
+                    generate_audio=requested_generate_audio,
                     service_tier=service_tier,
                     seed=seed,
                     visual_basis_digest=visual_basis_digest,
@@ -1459,7 +1445,7 @@ async def execute_video_task(
             seed=seed,
             service_tier=service_tier,
             visual_basis_digest=visual_basis_digest,
-            generate_audio=ctx.video.requested_generate_audio,
+            generate_audio=requested_generate_audio,
             poll_timeout_seconds=poll_timeout_seconds,
             warnings=warnings,
         )

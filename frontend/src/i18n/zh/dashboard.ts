@@ -1219,7 +1219,7 @@ export default {
   'duration_incompatible_reference_warning': '当前秒数 {{value}} 在参考生视频下不可用，可选 [{{supported}}]',
   'duration_seconds_value_text': '{{value}} 秒',
   'duration_no_options': '当前模型未配置可用时长，无法修改',
-  'duration_not_driven_notice': '该模型的时长不由 ArcReel 决定：每段成片多长由 workflow 自己说了算。',
+  'duration_not_driven_notice': '时长由端点固定：每段成片多长由 workflow 决定。',
   'duration_locked_generating': '该分镜正在生成中，暂不能修改时长',
   'add_model_manually': '手动添加模型',
   'discover_or_add_hint': '点击「获取模型列表」自动发现，或',
@@ -1610,6 +1610,20 @@ export default {
   'reference_script_plan_confirm_blocked_hint': '存在阻断违约，Agent 修复完成后才能确认',
   'reference_script_plan_duration_out_of_tier': '档位已失效',
   'reference_script_plan_duration_out_of_tier_hint': '有视频单元的时长已不在当前生效档位内，请重新选择后再确认',
+  'reference_bucket_i2v': '图生视频（无参考图）',
+  'reference_bucket_r2v': '参考生视频（带参考图）',
+  'reference_unit_tier_unknown_label': '{{bucket}}档位未知',
+  'reference_unit_tier_unknown_hint': '{{reason}}（{{code}}）；请在项目设置中配置可用的{{bucket}}模型，或在「设置 → 供应商」中修复模型配置。',
+  'reference_unit_tier_reason_unsupported': '当前模型不支持{{bucket}}',
+  'reference_unit_tier_reason_removed': '{{bucket}}模型已删除或停用',
+  'reference_unit_tier_reason_missing_tiers': '{{bucket}}模型未声明时长档位',
+  'reference_unit_tier_reason_invalid_tiers': '{{bucket}}模型的时长档位无效',
+  'reference_unit_tier_reason_incompatible': '当前分辨率没有兼容的{{bucket}}时长档位',
+  'reference_unit_tier_reason_unresolved': '{{bucket}}模型能力无法解析',
+  'reference_unit_split_title': '声明引用与可用参考图不一致，修复引用后才能生成',
+  'reference_unit_bucket_changed': '本单元将按{{hydrated}}执行，而非声明的{{declared}}',
+  'reference_unit_unavailable_references': '引用的资产缺图：{{names}}',
+  'reference_unit_unregistered_references': '未登记的引用：{{names}}',
   'reference_script_plan_confirm_continue_prefill': '第 {{episode}} 集的拆分已确认，请继续生成脚本与参考生视频。',
   'reference_script_plan_fix_request_prefill_header':
     '第 {{episode}} 集参考生视频的脚本规划草稿有 {{count}} 处违约待修复，请用 doc_type=reference_script_plan 调用 open_draft 读取草稿，再用同一 doc_type 调用 patch_draft 修正，并把 open_draft 返回的 revision 作为 base_revision 传入：',
@@ -1640,6 +1654,7 @@ export default {
   'more_actions': '更多操作',
   'delete_project': '删除项目',
   'confirm_delete_project': '确定要删除项目「{{title}}」吗？此操作不可撤销。',
+  'delete_project_failed': '删除项目「{{title}}」失败：{{message}}',
   'deleting_project': '删除中...',
 
   // SystemConfigPage - language
@@ -1724,7 +1739,7 @@ export default {
   'chat_interrupt_notice': '用户中断了会话',
   'chat_question_answer_label': '已答复',
   // MCP tool display names (single source of truth: ARCREEL_MCP_TOOL_IDS in
-  // server/agent_runtime/sdk_tools/__init__.py; tests/test_frontend_mcp_tool_i18n.py
+  // server/agent_toolset/toolset.py; tests/unit/test_frontend_mcp_tool_i18n.py
   // 会校验缺漏，新增 backend tool 必须同步补全 zh/en/vi)
   'tool_name_list_pending_assets': '查询待生成资产',
   'tool_name_list_projects': '列出项目',

@@ -33,8 +33,8 @@ def render_reference_prompt_preview(
     if blockers:
         result["unavailable"] = translate(blockers[0].code, **blockers[0].parameters())
         return result
-    candidate = projection.provider_candidate
-    if candidate is None:
+    request_facts = projection.request_facts
+    if request_facts is None:
         result["unavailable"] = translate(
             "reference_capability_unavailable", capability=projection.hydrated_generation_type
         )
@@ -46,13 +46,8 @@ def render_reference_prompt_preview(
     rendered = render_video_unit_prompt(
         unit,
         project,
-        VoiceRenderSettings(
-            voice_consistency=candidate.voice_consistency,
-            requested_generate_audio=candidate.requested_generate_audio,
-            max_reference_audio=candidate.max_reference_audio_count,
-            model_id=candidate.model_id,
-            audio_ready=resolve_reference_audio_paths(project, project_path),
-            requires_reference_image=candidate.reference_audio_per_image,
+        VoiceRenderSettings.from_request_facts(
+            request_facts, audio_ready=resolve_reference_audio_paths(project, project_path)
         ),
         request_references=[asset.reference for asset in projection.request_assets],
     )

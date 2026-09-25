@@ -39,6 +39,7 @@ from lib.backends.providers import CallPurpose, CallType, require_provider_pair
 from lib.billing.ledger import Ledger
 from lib.config.service import DEFAULT_VIDEO_POLL_TIMEOUT_SECONDS
 from lib.db.base import DEFAULT_USER_ID
+from lib.generation.video_request_facts import DEFAULT_PLANNED_DURATION_SECONDS
 from lib.infra.async_thread import run_noninterruptible_sync
 from lib.infra.path_safety import PathTraversalError, safe_join
 from lib.project.resource_paths import resource_relative_path
@@ -159,10 +160,10 @@ def segment_id_for(call_type: CallType, resource_type: str, resource_id: str) ->
     return resource_id if resource_type in allowed else None
 
 
-def _input_path(project_path: Path, value: object) -> str | None:
-    """把一份输入素材的路径归一为项目内相对路径（POSIX 分隔符）。
+def _project_relative_path(project_path: Path, value: object) -> str | None:
+    """把调用记录里的一个文件路径（输入素材或产物）归一为项目内相对路径（POSIX 分隔符）。
 
-    落库的是「这次调用喂进去的是哪份素材」，读侧要拿它在项目里定位文件，故一律相对项目根；
+    读侧要拿它在项目里定位文件，且数据根挪位后记录仍须有效，故一律相对项目根；
     项目外的路径（临时素材、绝对路径引用）保留原样。非路径值（PIL Image 等）返回 None，
     由调用点决定是否记这一项。
     """
@@ -609,14 +610,14 @@ class MediaGenerator:
                 provider=cast(str, self._image_provider_id),
                 user_id=self._user_id,
                 segment_id=segment_id_for("image", resource_type, resource_id),
-                output_path=str(output_path),
+                output_path=_project_relative_path(self.project_path, output_path),
                 task_id=task_id,
                 purpose=CallPurpose.GENERATION_TASK,
                 inputs=_ledger_inputs(
                     reference_images=[
                         {"path": rel, "label": None, "role": "array"}
                         for ref in ref_images
-                        if (rel := _input_path(self.project_path, ref.path)) is not None
+                        if (rel := _project_relative_path(self.project_path, ref.path)) is not None
                     ]
                 ),
             ) as call:
@@ -734,7 +735,7 @@ class MediaGenerator:
                 provider=cast(str, self._audio_provider_id),
                 user_id=self._user_id,
                 segment_id=segment_id_for("audio", resource_type, resource_id),
-                output_path=str(output_path),
+                output_path=_project_relative_path(self.project_path, output_path),
                 task_id=task_id,
                 purpose=CallPurpose.GENERATION_TASK,
                 inputs=_ledger_inputs(
@@ -840,9 +841,9 @@ class MediaGenerator:
         # 让版本元数据与 provider 请求里的 duration_seconds 类型一致（都是 int），
         # 避免 versions.json 落字符串而 ApiCall 落 int 的类型漂移。
         try:
-            duration_int = int(float(duration_seconds)) if duration_seconds else 8
+            duration_int = int(float(duration_seconds)) if duration_seconds else DEFAULT_PLANNED_DURATION_SECONDS
         except (ValueError, TypeError):
-            duration_int = 8
+            duration_int = DEFAULT_PLANNED_DURATION_SECONDS
 
         # 1. 若已存在，确保旧文件被记录。这里的 prompt / duration / provider 选项都属于即将
         # 发起的新请求，不能写到来源不明的 legacy current 上；否则新产物被拒绝回滚后，旧视频
@@ -953,21 +954,21 @@ class MediaGenerator:
                 user_id=self._user_id,
                 segment_id=segment_id_for("video", resource_type, resource_id),
                 service_tier=version_metadata.get("service_tier", "default"),
-                output_path=str(output_path),
+                output_path=_project_relative_path(self.project_path, output_path),
                 task_id=task_id,
                 purpose=CallPurpose.GENERATION_TASK,
                 inputs=_ledger_inputs(
                     reference_images=[
                         {"path": rel, "label": None, "role": "array"}
                         for ref in (reference_images or [])
-                        if (rel := _input_path(self.project_path, ref)) is not None
+                        if (rel := _project_relative_path(self.project_path, ref)) is not None
                     ],
-                    start_image=_input_path(self.project_path, start_image),
-                    end_image=_input_path(self.project_path, end_image),
+                    start_image=_project_relative_path(self.project_path, start_image),
+                    end_image=_project_relative_path(self.project_path, end_image),
                     reference_audio=[
                         rel
                         for audio in (reference_audio_files or [])
-                        if (rel := _input_path(self.project_path, audio)) is not None
+                        if (rel := _project_relative_path(self.project_path, audio)) is not None
                     ],
                     parameters=_ledger_inputs(service_tier=version_metadata.get("service_tier")),
                 ),
@@ -1115,9 +1116,9 @@ class MediaGenerator:
         # 提前到 VideoGenerationRequest / add_version 之前，让版本元数据
         # 与 provider 请求里的 duration_seconds 类型一致（都是 int，避免 versions.json 落字符串）。
         try:
-            duration_int = int(float(duration_seconds)) if duration_seconds else 8
+            duration_int = int(float(duration_seconds)) if duration_seconds else DEFAULT_PLANNED_DURATION_SECONDS
         except (ValueError, TypeError):
-            duration_int = 8
+            duration_int = DEFAULT_PLANNED_DURATION_SECONDS
 
         if self._video_backend is None:
             raise RuntimeError("video_backend not configured")

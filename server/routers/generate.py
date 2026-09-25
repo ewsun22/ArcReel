@@ -26,6 +26,13 @@ from lib.artifacts.artifact_manifest import ArtifactKey
 from lib.config.resolver import ConfigResolver, video_bucket_for_generation_mode
 from lib.generation.generation_queue import get_generation_queue
 from lib.generation.generation_queue_client import TaskSpec
+from lib.generation.video_request_facts import (
+    CONFIGURED_VIDEO_IDENTITY,
+    VideoRequestFacts,
+    VideoRequestFactsError,
+    audio_switch_conflict,
+    evaluate_video_request_facts,
+)
 from lib.infra.api_errors import BadRequestError, ConflictError, NotFoundError
 from lib.infra.json_io import domain_error_on_value_error
 from lib.infra.path_safety import safe_exists, safe_join
@@ -33,7 +40,6 @@ from lib.project.asset_derivatives import DERIVATIVE_TASK_TYPE, DerivativeSheetS
 from lib.project.asset_types import ASSET_SPECS, resolve_asset_key, validate_asset_name
 from lib.project.project_change_hints import build_change_label, emit_project_change_batch, project_change_source
 from lib.project.project_manager import get_project_manager, is_reference_video_project
-from lib.script.reference_video.request_projection import ProjectionResolutionError
 from lib.script.script_editor import resolve_items
 from lib.script.script_models import get_generated_assets
 from lib.script.script_skeleton import resolve_script_kind
@@ -305,8 +311,24 @@ async def generate_video(
     # 上面的生成模式检查已挡掉参考生视频，此处对能到达的项目恒为 i2v。解析闸预检让能力缺失 /
     # 悬空引用在提交入口即返回修复指引，而非任务面板里的异步失败。
     _video_bucket = video_bucket_for_generation_mode(project.get("generation_mode"))
-    await require_video_bucket_capability(project, _video_bucket)
-    await require_audio_switch_supported(project, _video_bucket)
+    video_request_facts = None
+    if req.narration_delivery == USE_TTS:
+        from lib.db import async_session_factory
+
+        video_request_facts = await evaluate_video_request_facts(
+            project,
+            route="storyboard",
+            generation_type=_video_bucket,
+            identity=CONFIGURED_VIDEO_IDENTITY,
+            resolver=ConfigResolver(async_session_factory),
+        )
+        if isinstance(video_request_facts, VideoRequestFacts) and (
+            conflict := audio_switch_conflict(video_request_facts)
+        ):
+            raise BadRequestError(conflict.code, **conflict.parameters())
+    else:
+        await require_video_bucket_capability(project, _video_bucket)
+        await require_audio_switch_supported(project, _video_bucket)
 
     delivery_projection: NarratedVideoDurationPreparation | None = None
     delivery_payload: dict[str, object] | None = None
@@ -343,8 +365,9 @@ async def generate_video(
                 ),
                 user_id=user.id,
                 queue=queue,
+                video_request_facts=video_request_facts,
             )
-        except ProjectionResolutionError as exc:
+        except VideoRequestFactsError as exc:
             raise BadRequestError(exc.code, **exc.params) from exc
         delivery_payload = await _localized_narrated_video_payload(delivery_projection, _t)
         if not delivery_payload["allowed"]:

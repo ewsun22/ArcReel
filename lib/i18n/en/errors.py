@@ -124,6 +124,9 @@ MESSAGES = {
         "running, and a retry only queues what is still missing"
     ),
     "video_supported_durations_missing": "The selected video model does not declare supported duration tiers",
+    "video_supported_durations_invalid": "{provider}/{model} has invalid duration tier metadata, so it cannot be quoted or generated",
+    "video_supported_durations_incompatible": "{provider}/{model} has no compatible duration tier for the current resolution",
+    "video_capability_unavailable": "Could not resolve {capability} video capabilities; check the provider and model configuration",
     "video_prompt_must_be_string_or_action_object": "prompt must be a string or an object containing action/camera_motion",
     "video_prompt_action_empty": "prompt.action cannot be empty",
     "video_prompt_dialogue_array": "prompt.dialogue must be an array",
@@ -209,7 +212,6 @@ MESSAGES = {
     "script_review_script_plan_confirmed": "The script plan is confirmed and can no longer be edited; make changes on the timeline, or re-run the script plan to redo the whole episode",
     "script_review_overwrite_required": "This episode already has a formal script. Confirming overwrites it: every existing shot is removed and its storyboard images and videos are no longer shown. Acknowledge the overwrite and retry",
     "script_review_conversion_refused": "The script plan cannot be converted to a formal script yet, so it was not confirmed; check shot durations, dialogue and the script plan status, then retry",
-    "script_review_video_model_unresolved": "No usable video model is configured, so shot duration tiers cannot be determined and the confirmation was not completed; configure a video provider in Settings → Providers, or pick a video model in the project settings, then retry",
     "script_review_foreign_formal_script": (
         "The script file bound to episode {episode} is gone and the canonical path scripts/{filename} holds another "
         "episode's script, so the confirmation was not completed — writing there would rebuild that other episode; "

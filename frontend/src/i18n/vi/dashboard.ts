@@ -1202,7 +1202,7 @@ export default {
   'duration_incompatible_reference_warning': '{{value}}s đã chọn không khả dụng ở chế độ Reference-to-Video — khả dụng: [{{supported}}]',
   'duration_seconds_value_text': '{{value}}s',
   'duration_no_options': 'Mô hình hiện tại không có thời lượng cấu hình — không thể thay đổi',
-  'duration_not_driven_notice': 'Thời lượng của model này không do ArcReel quyết định: workflow tự định đoạt độ dài mỗi đoạn.',
+  'duration_not_driven_notice': 'Thời lượng do endpoint cố định: workflow quyết định độ dài mỗi đoạn.',
   'duration_locked_generating': 'Cảnh này đang được tạo — hiện chưa thể thay đổi thời lượng',
   'add_model_manually': 'Thêm mô hình thủ công',
   'discover_or_add_hint': 'Nhấn "Phát hiện mô hình" để tự phát hiện, hoặc',
@@ -1587,6 +1587,20 @@ export default {
   'reference_script_plan_confirm_blocked_hint': 'Còn vi phạm chặn — chỉ xác nhận được sau khi Agent sửa xong',
   'reference_script_plan_duration_out_of_tier': 'Mức thời lượng không còn hợp lệ',
   'reference_script_plan_duration_out_of_tier_hint': 'Có đơn vị video có thời lượng nằm ngoài các mức hiện hợp lệ — hãy chọn lại trước khi xác nhận',
+  'reference_bucket_i2v': 'tạo video từ ảnh (không có ảnh tham chiếu)',
+  'reference_bucket_r2v': 'tạo video từ ảnh tham chiếu (có ảnh tham chiếu)',
+  'reference_unit_tier_unknown_label': 'Chưa rõ mức thời lượng {{bucket}}',
+  'reference_unit_tier_unknown_hint': '{{reason}} ({{code}}). Hãy chọn mô hình {{bucket}} khả dụng trong cài đặt dự án hoặc sửa cấu hình mô hình tại Cài đặt → Nhà cung cấp.',
+  'reference_unit_tier_reason_unsupported': 'Mô hình hiện tại không hỗ trợ {{bucket}}',
+  'reference_unit_tier_reason_removed': 'Mô hình {{bucket}} đã bị xóa hoặc tắt',
+  'reference_unit_tier_reason_missing_tiers': 'Mô hình {{bucket}} chưa khai báo mức thời lượng',
+  'reference_unit_tier_reason_invalid_tiers': 'Mức thời lượng của mô hình {{bucket}} không hợp lệ',
+  'reference_unit_tier_reason_incompatible': 'Không có mức thời lượng {{bucket}} tương thích với độ phân giải hiện tại',
+  'reference_unit_tier_reason_unresolved': 'Không thể xác định khả năng của mô hình {{bucket}}',
+  'reference_unit_split_title': 'Tham chiếu đã khai báo và ảnh tham chiếu khả dụng không khớp — hãy sửa tham chiếu trước khi tạo',
+  'reference_unit_bucket_changed': 'Đơn vị này sẽ chạy theo {{hydrated}} thay vì {{declared}} như đã khai báo',
+  'reference_unit_unavailable_references': 'Tài sản được tham chiếu chưa có ảnh: {{names}}',
+  'reference_unit_unregistered_references': 'Tham chiếu chưa đăng ký: {{names}}',
   'reference_script_plan_confirm_continue_prefill': 'Đã xác nhận việc chia tập {{episode}}, hãy tiếp tục tạo kịch bản và video từ ảnh tham chiếu.',
   'reference_script_plan_fix_request_prefill_header':
     'Bản nháp kế hoạch kịch bản video từ ảnh tham chiếu của tập {{episode}} có {{count}} vi phạm cần sửa; hãy gọi open_draft với doc_type=reference_script_plan để đọc, sau đó sửa bằng patch_draft với cùng doc_type và truyền revision trả về làm base_revision:',
@@ -1617,6 +1631,7 @@ export default {
   'more_actions': 'Thao tác khác',
   'delete_project': 'Xóa dự án',
   'confirm_delete_project': 'Bạn có chắc muốn xóa dự án "{{title}}"? Thao tác không thể hoàn tác.',
+  'delete_project_failed': 'Xóa dự án "{{title}}" thất bại: {{message}}',
   'deleting_project': 'Đang xóa...',
 
   // SystemConfigPage - language
@@ -1879,7 +1894,7 @@ export default {
   'tool_call_todo_summary': 'Danh sách việc cần làm hoàn thành {{completed}}/{{total}}',
   'tool_call_todo_updated': 'Danh sách việc cần làm đã cập nhật',
   // MCP tool display names (single source of truth: ARCREEL_MCP_TOOL_IDS in
-  // server/agent_runtime/sdk_tools/__init__.py; tests/test_frontend_mcp_tool_i18n.py
+  // server/agent_toolset/toolset.py; tests/unit/test_frontend_mcp_tool_i18n.py
   // sẽ kiểm tra các ngôn ngữ đồng bộ, thêm tool backend mà thiếu zh/en/vi sẽ fail CI)
   'tool_name_list_pending_assets': 'Liệt kê tài sản chờ tạo',
   'tool_name_list_projects': 'Liệt kê dự án',

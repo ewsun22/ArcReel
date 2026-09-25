@@ -1220,7 +1220,7 @@ export default {
   'duration_incompatible_reference_warning': 'Selected {{value}}s is unavailable in Reference-to-Video mode — available: [{{supported}}]',
   'duration_seconds_value_text': '{{value}}s',
   'duration_no_options': 'Current model has no configured durations — cannot change',
-  'duration_not_driven_notice': 'Duration is not driven by ArcReel for this model: the workflow decides how long each clip is.',
+  'duration_not_driven_notice': 'Duration is fixed by the endpoint: the workflow decides how long each clip is.',
   'duration_locked_generating': 'This shot is generating — duration cannot be changed right now',
   'add_model_manually': 'Add model manually',
   'discover_or_add_hint': 'Click "Discover Models" to auto-discover, or',
@@ -1611,6 +1611,20 @@ export default {
   'reference_script_plan_confirm_blocked_hint': 'Blocking violations are present — confirm once the agent finishes fixing them',
   'reference_script_plan_duration_out_of_tier': 'Tier no longer valid',
   'reference_script_plan_duration_out_of_tier_hint': 'One or more video units have a duration outside the currently valid tiers — pick a new value before confirming',
+  'reference_bucket_i2v': 'image-to-video (no reference image)',
+  'reference_bucket_r2v': 'reference-to-video (with reference images)',
+  'reference_unit_tier_unknown_label': '{{bucket}} tiers unknown',
+  'reference_unit_tier_unknown_hint': '{{reason}} ({{code}}). Configure an available {{bucket}} model in project settings, or fix the model under Settings → Providers.',
+  'reference_unit_tier_reason_unsupported': 'The current model does not support {{bucket}}',
+  'reference_unit_tier_reason_removed': 'The {{bucket}} model was removed or disabled',
+  'reference_unit_tier_reason_missing_tiers': 'The {{bucket}} model has no duration tiers',
+  'reference_unit_tier_reason_invalid_tiers': 'The {{bucket}} model has invalid duration tiers',
+  'reference_unit_tier_reason_incompatible': 'No {{bucket}} duration tier works at the current resolution',
+  'reference_unit_tier_reason_unresolved': '{{bucket}} model capabilities cannot be resolved',
+  'reference_unit_split_title': 'Declared references and available reference images disagree — repair the references before generating',
+  'reference_unit_bucket_changed': 'This unit will run as {{hydrated}} instead of the declared {{declared}}',
+  'reference_unit_unavailable_references': 'Referenced assets without an image: {{names}}',
+  'reference_unit_unregistered_references': 'Unregistered references: {{names}}',
   'reference_script_plan_confirm_continue_prefill': 'Episode {{episode}}’s split is confirmed — please continue generating the script and reference-to-video outputs.',
   'reference_script_plan_fix_request_prefill_header':
     'Episode {{episode}}’s reference-to-video script plan draft has {{count}} violation(s) to fix — call open_draft with doc_type=reference_script_plan to read it, then correct it with patch_draft using the same doc_type and pass the returned revision as base_revision:',
@@ -1641,6 +1655,7 @@ export default {
   'more_actions': 'More Actions',
   'delete_project': 'Delete Project',
   'confirm_delete_project': 'Are you sure you want to delete project "{{title}}"? This action cannot be undone.',
+  'delete_project_failed': 'Failed to delete project "{{title}}": {{message}}',
   'deleting_project': 'Deleting...',
 
   // SystemConfigPage - language
@@ -1725,7 +1740,7 @@ export default {
   'chat_interrupt_notice': 'Session interrupted by user',
   'chat_question_answer_label': 'Answered',
   // MCP tool display names (single source of truth: ARCREEL_MCP_TOOL_IDS in
-  // server/agent_runtime/sdk_tools/__init__.py; tests/test_frontend_mcp_tool_i18n.py
+  // server/agent_toolset/toolset.py; tests/unit/test_frontend_mcp_tool_i18n.py
   // enforces all locales stay in sync — adding a backend tool without wiring zh/en/vi fails CI)
   'tool_name_list_pending_assets': 'List pending assets',
   'tool_name_list_projects': 'List projects',

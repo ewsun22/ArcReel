@@ -124,6 +124,9 @@ MESSAGES = {
         "bình thường, thử lại chỉ xếp hàng phần còn thiếu"
     ),
     "video_supported_durations_missing": "Mô hình video đã chọn chưa khai báo các mức thời lượng được hỗ trợ",
+    "video_supported_durations_invalid": "Dữ liệu mức thời lượng của {provider}/{model} không hợp lệ, nên không thể báo giá hoặc tạo video",
+    "video_supported_durations_incompatible": "{provider}/{model} không có mức thời lượng tương thích với độ phân giải hiện tại",
+    "video_capability_unavailable": "Không thể phân giải khả năng video {capability}; hãy kiểm tra cấu hình nhà cung cấp và mô hình",
     "video_prompt_must_be_string_or_action_object": "prompt phải là chuỗi hoặc đối tượng chứa action/camera_motion",
     "video_prompt_action_empty": "prompt.action không được để trống",
     "video_prompt_dialogue_array": "prompt.dialogue phải là mảng",
@@ -207,7 +210,6 @@ MESSAGES = {
     "script_review_script_plan_confirmed": "Kế hoạch kịch bản đã được xác nhận và không thể chỉnh sửa nữa; hãy chỉnh sửa trên dòng thời gian, hoặc chạy lại kế hoạch kịch bản để làm lại cả tập",
     "script_review_overwrite_required": "Tập này đã có kịch bản chính thức. Xác nhận sẽ ghi đè: mọi phân cảnh cũ bị xóa, ảnh phân cảnh và video của chúng không còn hiển thị. Hãy đồng ý ghi đè rồi thử lại",
     "script_review_conversion_refused": "Kế hoạch kịch bản chưa thể chuyển thành kịch bản chính thức nên chưa được xác nhận; hãy kiểm tra thời lượng phân cảnh, lời thoại và trạng thái kế hoạch kịch bản rồi thử lại",
-    "script_review_video_model_unresolved": "Chưa cấu hình mô hình video khả dụng nên không xác định được các mức thời lượng phân cảnh, xác nhận chưa hoàn tất; hãy cấu hình nhà cung cấp video trong Cài đặt → Nhà cung cấp, hoặc chọn mô hình video trong cài đặt dự án rồi thử lại",
     "script_review_foreign_formal_script": (
         "Tệp kịch bản được gán cho tập {episode} không còn, còn đường dẫn chuẩn scripts/{filename} lại chứa kịch bản "
         "của tập khác nên xác nhận chưa hoàn tất — ghi vào đó sẽ dựng lại kịch bản của tập kia; hãy trỏ script_file "

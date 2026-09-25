@@ -29,7 +29,8 @@ from lib.artifacts.artifact_manifest import (
 )
 from lib.artifacts.formal_write import project_metadata_lock
 from lib.artifacts.version_manager import VersionManager
-from lib.config.resolver import resolve_raw_supported_durations
+from lib.config.registry import model_info_for
+from lib.config.resolver import VideoGenerationType, project_video_backend_ids
 from lib.episode.episode_ledger import parse_positive_episode_num
 from lib.infra.content_digest import digest_stream, sha256_file
 from lib.infra.json_io import load_json
@@ -212,6 +213,32 @@ class ProjectArchiveValidationError(ValueError):
         return self.diagnostics.to_import_error_payload(translate)
 
 
+def _registry_bucket_durations(
+    project: dict[str, Any], generation_type: VideoGenerationType | None = None
+) -> list[int] | None:
+    ids = project_video_backend_ids(project, generation_type=generation_type)
+    model_info = model_info_for(*ids) if ids is not None else None
+    if model_info is None or not model_info.supported_durations:
+        return None
+    return list(model_info.supported_durations)
+
+
+def _registry_supported_durations(project: dict[str, Any]) -> list[int] | None:
+    """归档自报的视频模型在 registry 声明的时长全集；未声明型号或不在 registry 时为 None。
+
+    只读 project.json 与 registry，不经能力合成也不收窄：导入在没有配置库会话的线程里跑，
+    取不到视频请求事实，这份全集只用于给存量 per-shot 时长收编取档。参考生视频项目的单元按
+    可用参考图落 r2v 或 i2v，取两桶声明全集的并集，任一桶查不到时为 None，与在线内容确认同口径。
+    """
+    if project.get("generation_mode") != "reference_video":
+        return _registry_bucket_durations(project)
+    with_references = _registry_bucket_durations(project, "r2v")
+    without_references = _registry_bucket_durations(project, "i2v")
+    if with_references is None or without_references is None:
+        return None
+    return sorted(set(with_references) | set(without_references))
+
+
 class ProjectArchiveService:
     _VERSION_HISTORY_DIRS = frozenset(
         {
@@ -231,7 +258,7 @@ class ProjectArchiveService:
 
     def __init__(self, project_manager: ProjectManager):
         self.project_manager = project_manager
-        self.validator = DataValidator(projects_root=str(project_manager.projects_root))
+        self.validator = DataValidator(projects_dir=str(project_manager.projects_dir))
 
     def get_export_diagnostics(
         self,
@@ -1269,16 +1296,16 @@ class ProjectArchiveService:
         # 下游的结构校验（DataValidator）要求 unit 级 duration_seconds 落在结构区间内，
         # 修复须先跑这道迁移再校验——本方法在 validate_project_tree 之前执行、写回结果
         # 由调用方按 script_changed 落盘，与其它字段修复共用同一次写盘。
-        # 档位表按归档自带 project.json 的自报身份查 registry（无 DB 访问——导入跑在 to_thread
-        # 里，且此刻自定义供应商的凭证/能力可能尚未导入本机）：迁移一次落盘，与生成侧、内容确认
-        # 口径不一致会让先跑的把非档位秒数固化。查不到（未声明型号、或自定义供应商不在 registry）
-        # 时为 None，退回结构区间 clamp。
+        # 档位表按归档自带 project.json 的自报身份查 registry 声明的全集（无 DB 访问——导入跑在
+        # to_thread 里，且此刻自定义供应商的凭证/能力可能尚未导入本机，无法求值视频请求事实）。
+        # 查不到（未声明型号、或自定义供应商不在 registry）时为 None，退回结构区间 clamp；档位
+        # 偏移由之后的预检 / 执行取档承担。
         # provider 先在副本上归一化：本方法跑在 migrate_project_dir 之前，存量归档里可能还是
         # legacy 别名（如 gemini/…），registry 查不到会让档位解析落空，而迁移幂等、归一化之后
         # 再无机会取档。归一化是纯函数且幂等，不影响随后的正式迁移。
         normalized_project = normalize_legacy_providers(project_payload)
         migrated, migration_warnings = migrate_unit_durations(
-            raw_units, supported_durations=resolve_raw_supported_durations(normalized_project)
+            raw_units, supported_durations=_registry_supported_durations(normalized_project)
         )
         changed = migrated
         for message in migration_warnings:
@@ -1761,8 +1788,8 @@ class ProjectArchiveService:
         return None
 
     def _resolve_json_path(self, path: Path) -> Path | None:
-        """归档读写只允许落在 projects_root 或系统临时目录内；越界返回 None。"""
-        for base in (self.project_manager.projects_root, tempfile.gettempdir()):
+        """归档读写只允许落在项目目录或系统临时目录内；越界返回 None。"""
+        for base in (self.project_manager.projects_dir, tempfile.gettempdir()):
             resolved = try_safe_join(base, path)
             if resolved is not None:
                 return resolved
@@ -1988,7 +2015,7 @@ class ProjectArchiveService:
         project_title: str,
         conflict_policy: str,
     ) -> tuple[str, str]:
-        target_dir = self.project_manager.projects_root / preferred_name
+        target_dir = self.project_manager.projects_dir / preferred_name
         if conflict_policy == "prompt":
             if target_dir.exists():
                 raise ProjectArchiveValidationError(
@@ -2020,7 +2047,7 @@ class ProjectArchiveService:
         *,
         overwrite: bool,
     ) -> None:
-        target_dir = self.project_manager.projects_root / project_name
+        target_dir = self.project_manager.projects_dir / project_name
         backup_dir: Path | None = None
 
         try:

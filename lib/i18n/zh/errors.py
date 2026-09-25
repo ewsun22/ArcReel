@@ -119,6 +119,9 @@ MESSAGES = {
     "generation_enqueue_failed": "该单元的任务未能创建，请稍后重试",
     "generation_enqueue_interrupted": "批量入队中断，该单元本次未创建任务；已创建的任务照常执行，重试只会补上未创建的部分",
     "video_supported_durations_missing": "所选视频模型未声明可用时长档位",
+    "video_supported_durations_invalid": "{provider}/{model} 的时长档位声明无效，无法报价或生成",
+    "video_supported_durations_incompatible": "{provider}/{model} 在当前分辨率下没有兼容的时长档位",
+    "video_capability_unavailable": "无法解析 {capability} 视频能力，请检查供应商与模型配置",
     "video_prompt_must_be_string_or_action_object": "prompt 必须是字符串或包含 action/camera_motion 的对象",
     "video_prompt_action_empty": "prompt.action 不能为空",
     "video_prompt_dialogue_array": "prompt.dialogue 必须是数组",
@@ -196,7 +199,6 @@ MESSAGES = {
     "script_review_script_plan_confirmed": "脚本规划已确认，不能再修改；请在时间线上修改，要整集重做请重跑脚本规划",
     "script_review_overwrite_required": "本集已有正式脚本，确认会覆盖它：旧分镜全部移除，其分镜图与视频不再显示。请确认覆盖后重试",
     "script_review_conversion_refused": "脚本规划暂不能转为正式脚本，本次确认未完成；请检查分镜时长、台词与脚本规划状态后重试",
-    "script_review_video_model_unresolved": "尚未配置可用的视频模型，无法确定分镜时长档位，本次确认未完成；请在「全局设置 → 供应商」配置视频供应商，或在项目设置中选择视频模型后重试",
     "script_review_foreign_formal_script": "第 {episode} 集绑定的剧本文件已不在，而规范路径 scripts/{filename} 上是另一集的剧本，本次确认未完成——写进去会重建那一集的剧本；请把该集的 script_file 改回它自己的剧本文件后重试",
     "script_review_quarantine_unreadable": "待修复草稿文件已损坏或格式不符，无法读取，请让 Agent 重新拆分该集",
     # Source loader
