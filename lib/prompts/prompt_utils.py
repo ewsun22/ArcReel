@@ -66,8 +66,10 @@ def image_prompt_to_yaml(
                 "composition": {
                     "shot_type": "镜头类型",
                     "lighting": "光线描述",
-                    "ambiance": "氛围描述"
-                }
+                    "ambiance": "氛围描述",
+                    "blocking": "站位（可选，剧情演绎）"
+                },
+                "continuity": "连贯性（可选，剧情演绎）"
             }
         project_style: 项目级风格设置（从 project.json 读取）
         reference_images: 参考图类型声明行的值（``lib.prompts.reference_image_numbering``），非空时作为
@@ -75,14 +77,22 @@ def image_prompt_to_yaml(
         style_description: 项目风格描述
 
     Returns:
-        YAML 格式字符串，键序 Style / Visual style / Reference_Images / Scene / Composition / Avoid
+        YAML 格式字符串，键序 Style / Visual style / Reference_Images / Scene / Continuity / Composition / Avoid；
+        ``blocking`` 与 ``continuity`` 为空时不出现
     """
     ordered: dict[str, Any] = {"Scene": image_prompt["scene"]}
+    continuity = image_prompt.get("continuity")
+    if continuity:
+        ordered["Continuity"] = continuity
+    composition = image_prompt["composition"]
     ordered["Composition"] = {
-        "shot_type": image_prompt["composition"]["shot_type"],
-        "lighting": image_prompt["composition"]["lighting"],
-        "ambiance": image_prompt["composition"]["ambiance"],
+        "shot_type": composition["shot_type"],
+        "lighting": composition["lighting"],
+        "ambiance": composition["ambiance"],
     }
+    blocking = composition.get("blocking")
+    if blocking:
+        ordered["Composition"]["blocking"] = blocking
     return (
         builtin_templates.render(
             "storyboard/image",
@@ -111,7 +121,11 @@ def require_storyboard_scene(image_prompt: Mapping[str, Any]) -> str:
 
 
 def project_storyboard_image_prompt(image_prompt: object, project_style: str) -> tuple[str | dict[str, Any], str]:
-    """Project one script prompt into the canonical semantics shared by rendering and currency."""
+    """Project one script prompt into the canonical semantics shared by rendering and currency.
+
+    剧情演绎的 ``composition.blocking`` 与 ``continuity`` 只在非空时出现在投影里：没有这两项的
+    剧本投影结果与之前逐字相同，已生成分镜图的时效判定不受影响。
+    """
 
     if isinstance(image_prompt, str):
         prompt = image_prompt.strip()
@@ -123,17 +137,19 @@ def project_storyboard_image_prompt(image_prompt: object, project_style: str) ->
     scene = require_storyboard_scene(image_prompt)
     raw_composition = image_prompt.get("composition")
     composition = raw_composition if isinstance(raw_composition, Mapping) else {}
-    return (
-        {
-            "scene": scene,
-            "composition": {
-                "shot_type": str(composition.get("shot_type") or "Medium Shot"),
-                "lighting": str(composition.get("lighting") or ""),
-                "ambiance": str(composition.get("ambiance") or ""),
-            },
-        },
-        project_style,
-    )
+    projected_composition = {
+        "shot_type": str(composition.get("shot_type") or "Medium Shot"),
+        "lighting": str(composition.get("lighting") or ""),
+        "ambiance": str(composition.get("ambiance") or ""),
+    }
+    blocking = str(composition.get("blocking") or "").strip()
+    if blocking:
+        projected_composition["blocking"] = blocking
+    projected: dict[str, Any] = {"scene": scene, "composition": projected_composition}
+    continuity = str(image_prompt.get("continuity") or "").strip()
+    if continuity:
+        projected["continuity"] = continuity
+    return projected, project_style
 
 
 def video_prompt_to_yaml(video_prompt: dict) -> str:

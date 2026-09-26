@@ -78,7 +78,9 @@ def _extract_image_desc(scene: dict, references: Sequence[ReferenceImageSlot] = 
         parts.append(render_reference_mentions(str(scene_text), references))
     composition = image_prompt["composition"]
     if isinstance(composition, Mapping):
-        comp_parts = [f"{key}: {value}" for key, value in composition.items()]
+        comp_parts = [
+            f"{key}: {render_reference_mentions(str(value), references)}" for key, value in composition.items()
+        ]
         if comp_parts:
             parts.append("，".join(comp_parts))
     return "；".join(parts) if parts else ""

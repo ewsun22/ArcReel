@@ -308,6 +308,25 @@ class TestScriptModels:
         assert drama.content_mode == "drama"
         assert drama.scenes[0].duration_seconds == 8
 
+    def test_drama_visual_schema_requires_blocking_and_continuity(self):
+        from lib.script.script_models import DramaVisualScript
+
+        schema = DramaVisualScript.model_json_schema()
+        assert "continuity" in schema["$defs"]["DramaImagePrompt"]["required"]
+        assert "blocking" in schema["$defs"]["DramaComposition"]["required"]
+
+    def test_drama_image_prompt_without_blocking_or_continuity_loads_as_empty(self):
+        scene = DramaScene.model_validate(
+            {
+                "scene_id": "E1S01",
+                "characters_in_scene": ["姜月茴"],
+                "image_prompt": _image_prompt().model_dump(),
+                "video_prompt": _drama_video_prompt().model_dump(),
+            }
+        )
+        assert scene.image_prompt.continuity == ""
+        assert scene.image_prompt.composition.blocking == ""
+
 
 class TestAdScriptModels:
     """广告/短片剧本骨架：平铺 shots[]，口播文案一等。"""

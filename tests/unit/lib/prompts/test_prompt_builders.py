@@ -192,6 +192,23 @@ class TestRenderStoryboardImagePrompt:
             == once
         )
 
+    def test_drama_blocking_and_continuity_render_with_numbered_mentions(self):
+        references = [_sheet("character", "林清"), _sheet("character", "沈茹/黑化")]
+        prompt = {
+            **_STRUCTURED,
+            "composition": {**_STRUCTURED["composition"], "blocking": "@[林清]在画面左侧，视线投向@[沈茹/黑化]"},
+            "continuity": "@[林清]仍握着拆开的信",
+        }
+        rendered = render_storyboard_image_prompt(prompt, style="Anime", references=references)
+        assert "\nContinuity: 图1仍握着拆开的信\nComposition:\n" in rendered
+        assert "  ambiance: 雨天，室内昏暗\n  blocking: 图1在画面左侧，视线投向图2\nAvoid:" in rendered
+
+    def test_empty_blocking_and_continuity_render_as_before(self):
+        prompt = {**_STRUCTURED, "composition": {**_STRUCTURED["composition"], "blocking": ""}, "continuity": " "}
+        assert render_storyboard_image_prompt(prompt, style="Anime") == render_storyboard_image_prompt(
+            _STRUCTURED, style="Anime"
+        )
+
 
 class TestTextFormRerenderAfterStyleFieldsChange:
     """纯文本形态回贴后项目风格字段才补齐，再渲染时每条风格声明仍只出现一次。"""

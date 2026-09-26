@@ -176,6 +176,8 @@ def render_drama_content_for_prompt_authoring(content_scenes: list) -> str:
         sid = _neutralize_tags(str(scene.get("scene_id") or "?"))
         duration = scene.get("duration_seconds")
         header = f"### {sid}" + (f"（时长 {duration} 秒）" if duration else "")
+        if scene.get("segment_break") is True:
+            header += "（场景切换点）"
         lines = [header]
         raw_chars = scene.get("characters_in_scene")
         raw_scenes_ref = scene.get("scenes")
