@@ -119,6 +119,9 @@ export function CharacterCard({
   const [saving, setSaving] = useState(false);
   const [uploadingSheet, setUploadingSheet] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  // 本次会话保存过新参考图、还没重新生成资产图。参考图只喂资产图生成，分镜和视频用的是资产图，
+  // 不提示的话作者会以为换了参考图就换了角色形象
+  const [referenceSavedSinceSheet, setReferenceSavedSinceSheet] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const audioElRef = useRef<HTMLAudioElement>(null);
@@ -152,9 +155,10 @@ export function CharacterCard({
   }, [character.description, character.voice_style]);
 
   useEffect(() => {
-    // 角色立绘变化时重置图片加载错误标记
+    // 角色立绘变化时重置图片加载错误标记；资产图已换新，参考图待生效提示随之撤下
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setImgError(false);
+    setReferenceSavedSinceSheet(false);
   }, [character.character_sheet, sheetFp]);
 
   useEffect(() => {
@@ -287,6 +291,7 @@ export function CharacterCard({
   };
 
   const handleSave = async () => {
+    const savingReference = referenceFile !== null;
     setSaving(true);
     try {
       await onSave(name, {
@@ -295,9 +300,15 @@ export function CharacterCard({
         referenceFile,
         audioFile,
       });
+      if (savingReference) setReferenceSavedSinceSheet(true);
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleGenerate = () => {
+    setReferenceSavedSinceSheet(false);
+    onGenerate(name);
   };
 
   const sheetUrl = character.character_sheet
@@ -310,6 +321,12 @@ export function CharacterCard({
 
   const displayedReferenceUrl = referencePreview ?? savedReferenceUrl;
   const hasSavedReference = Boolean(savedReferenceUrl) && !referencePreview;
+  // 已保存的参考图比资产图新：本次会话刚保存，或文件指纹（mtime）晚于资产图
+  const referenceNewerThanSheet =
+    hasSavedReference &&
+    Boolean(character.character_sheet) &&
+    (referenceSavedSinceSheet ||
+      (referenceFp != null && sheetFp != null && referenceFp > sheetFp));
 
   const savedAudioUrl = character.reference_audio
     ? API.getFileUrl(projectName, character.reference_audio, audioFp)
@@ -546,6 +563,16 @@ export function CharacterCard({
               {t("upload_reference")}
             </button>
           )}
+          {!readOnly && displayedReferenceUrl && (
+            <p
+              className="mt-1.5 text-[11px] leading-[1.5]"
+              style={{
+                color: referenceNewerThanSheet ? "var(--color-accent-2)" : "var(--color-text-4)",
+              }}
+            >
+              {referenceNewerThanSheet ? t("reference_sheet_stale") : t("reference_sheet_hint")}
+            </p>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -757,10 +784,12 @@ export function CharacterCard({
       {readOnly ? null : (
       <div className="mt-4">
         <GenerateButton
-          onClick={() => onGenerate(name)}
+          onClick={handleGenerate}
           loading={generating}
           label={character.character_sheet ? t("regenerate_design") : t("generate_design")}
-          className="w-full justify-center"
+          className={`w-full justify-center${
+            referenceNewerThanSheet ? " ring-2 ring-[var(--color-accent-2)] ring-offset-2 ring-offset-transparent" : ""
+          }`}
         />
       </div>
       )}

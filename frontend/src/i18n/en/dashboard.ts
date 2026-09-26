@@ -290,6 +290,8 @@ export default {
   'unsaved_reference': 'Unsaved Reference',
   'saved_reference': 'Saved Reference',
   'upload_reference': 'Upload Reference',
+  'reference_sheet_hint': 'The reference only feeds the asset sheet; storyboards and videos use the asset sheet',
+  'reference_sheet_stale': 'Reference updated. Regenerate the asset sheet for it to take effect',
   'description': 'Description',
   'character_desc_placeholder': 'Enter character description...',
   'scene_desc_placeholder': 'Enter scene description...',
