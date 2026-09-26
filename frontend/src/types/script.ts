@@ -201,11 +201,15 @@ export interface Composition {
   shot_type: ShotType;
   lighting: string;
   ambiance: string;
+  /** 剧情演绎：角色站位、朝向与视线；存量剧本没有。 */
+  blocking?: string;
 }
 
 export interface ImagePrompt {
   scene: string;
   composition: Composition;
+  /** 剧情演绎：与上一分镜须保持一致的可见状态；存量剧本没有。 */
+  continuity?: string;
 }
 
 export interface VideoPrompt {

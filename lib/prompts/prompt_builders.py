@@ -90,6 +90,11 @@ def render_storyboard_image_prompt(
 
     if isinstance(projected, dict):
         projected["scene"] = render_reference_mentions(projected["scene"], references)
+        if "continuity" in projected:
+            projected["continuity"] = render_reference_mentions(projected["continuity"], references)
+        composition = projected["composition"]
+        if "blocking" in composition:
+            composition["blocking"] = render_reference_mentions(composition["blocking"], references)
         return image_prompt_to_yaml(
             projected,
             normalized_style,

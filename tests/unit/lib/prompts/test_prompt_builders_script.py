@@ -139,6 +139,13 @@ class TestPromptBuildersScript:
         assert "原文锚：" in rendered
         assert "不要复制进视觉字段" not in rendered
 
+    def test_render_drama_content_marks_scene_breaks(self):
+        first = {**self._content_scene_with_passthrough(), "scene_id": "E1S01", "segment_break": True}
+        second = {**self._content_scene_with_passthrough(), "scene_id": "E1S02"}
+        rendered = render_drama_content_for_prompt_authoring([first, second])
+        assert "### E1S01（时长 8 秒）（场景切换点）" in rendered
+        assert "### E1S02（时长 8 秒）\n" in rendered
+
     def test_render_drama_content_filters_non_string_assets_and_neutralizes_tags(self):
         """降级 / 手改 script_plan 的脏数据鲁棒性：非字符串资产项被过滤（不抛 TypeError），逐字内容里的
         尖括号经中和，避免打散嵌入它的 prompt_authoring ``<shots>`` 标签块。"""

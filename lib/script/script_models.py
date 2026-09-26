@@ -7,6 +7,7 @@ script_models.py - 剧本数据模型
 """
 
 import logging
+from collections.abc import Callable
 from typing import Annotated, Any, ClassVar, Literal, get_args
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, create_model, model_validator
@@ -137,6 +138,43 @@ class ImagePrompt(BaseModel):
 
     scene: str = Field(description="画面静态描述；动态内容由 video_prompt.action 承载")
     composition: Composition = Field(description="构图信息")
+
+
+def _schema_requires(*names: str) -> Callable[[dict[str, Any]], None]:
+    """把带默认值的字段也列进 JSON schema 的 ``required``：response_schema 要求模型写出，读盘与解析仍按默认值放行。"""
+
+    def extra(schema: dict[str, Any]) -> None:
+        required = list(schema.get("required", []))
+        schema["required"] = required + [name for name in names if name not in required]
+
+    return extra
+
+
+class DramaComposition(Composition):
+    """剧情演绎分镜的构图：在通用构图之上加站位。存量剧本没有站位时为空串，渲染时略去。"""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True, json_schema_extra=_schema_requires("blocking"))
+
+    blocking: str = Field(
+        default="",
+        description="站位：每个出场角色在画面中的位置（左 / 中 / 右、前景 / 背景）、身体朝向与视线方向",
+    )
+
+
+class DramaImagePrompt(BaseModel):
+    """剧情演绎分镜图 Prompt：在通用结构之上加站位与连贯性。
+
+    存量剧本缺这两项时为空串，渲染时略去；通用 ``ImagePrompt`` 实例按属性读入。
+    """
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True, json_schema_extra=_schema_requires("continuity"))
+
+    scene: str = Field(description="画面静态描述；动态内容由 video_prompt.action 承载")
+    composition: DramaComposition = Field(description="构图信息")
+    continuity: str = Field(
+        default="",
+        description="连贯性：与上一分镜须保持一致的可见状态（服装、手持物、伤痕 / 污渍、道具位置、时间与天气）",
+    )
 
 
 class _VideoPromptCore(BaseModel):
@@ -512,7 +550,7 @@ class DramaScene(BaseModel):
     characters_in_scene: list[str] = Field(description="出场角色名称列表")
     scenes: list[str] = Field(default_factory=list, description="出场场景名称列表")
     props: list[str] = Field(default_factory=list, description="出场道具名称列表")
-    image_prompt: ImagePrompt | PromptText | PendingPrompt = Field(default=None, description="分镜图生成提示词")
+    image_prompt: DramaImagePrompt | PromptText | PendingPrompt = Field(default=None, description="分镜图生成提示词")
     # drama 的 video_prompt 只承载画面动作、运镜与环境音，口播由下方 utterances 承载。
     video_prompt: DramaVideoPrompt | PromptText | PendingPrompt = Field(default=None, description="视频生成提示词")
     # utterances 统一承载分镜级角色台词与画外音；条目顺序即幕内发声顺序（见 ADR 0040）。
@@ -621,7 +659,7 @@ class DramaSceneVisual(BaseModel):
     model_config = _STRICT_CONFIG
 
     scene_id: str = Field(min_length=1, description="对齐锚：必须等于 script_plan 已定分镜的 scene_id")
-    image_prompt: ImagePrompt = Field(description="分镜图生成提示词")
+    image_prompt: DramaImagePrompt = Field(description="分镜图生成提示词")
     video_prompt: DramaVideoPrompt = Field(description="视频生成提示词（无 dialogue，口播在 script_plan utterances）")
 
 
