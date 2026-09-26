@@ -291,6 +291,8 @@ export default {
   'unsaved_reference': 'Tham chiếu chưa lưu',
   'saved_reference': 'Tham chiếu đã lưu',
   'upload_reference': 'Tải lên tham chiếu',
+  'reference_sheet_hint': 'Ảnh tham chiếu chỉ dùng để tạo hình tài sản; phân cảnh và video dùng hình tài sản',
+  'reference_sheet_stale': 'Đã cập nhật ảnh tham chiếu. Hãy tạo lại hình tài sản để áp dụng',
   'description': 'Mô tả',
   'character_desc_placeholder': 'Nhập mô tả nhân vật...',
   'scene_desc_placeholder': 'Nhập mô tả cảnh...',

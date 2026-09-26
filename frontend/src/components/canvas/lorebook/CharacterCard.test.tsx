@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CharacterCard } from "./CharacterCard";
 import { API } from "@/api";
 import { useAppStore } from "@/stores/app-store";
+import { useProjectsStore } from "@/stores/projects-store";
 import { useTasksStore } from "@/stores/tasks-store";
 import { makeTask } from "@/test/factories";
 
@@ -27,6 +28,7 @@ describe("CharacterCard", () => {
 
   afterEach(() => {
     useTasksStore.setState({ tasks: [], optimisticActive: new Set() });
+    useProjectsStore.setState({ assetFingerprints: {} });
   });
 
   it("previews the unsaved description without saving the card", async () => {
@@ -112,6 +114,89 @@ describe("CharacterCard", () => {
         audioFile: null,
       });
     });
+  });
+
+  it("prompts regenerating the sheet after a new reference is saved, until generate is clicked", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onGenerate = vi.fn();
+    const character = {
+      description: "hero desc",
+      voice_style: "warm",
+      character_sheet: "characters/Hero.png",
+    };
+    const { rerender } = render(
+      <CharacterCard name="Hero" character={character} projectName="demo"
+        onSave={onSave} onGenerate={onGenerate} />,
+    );
+
+    const file = new File(["ref"], "hero.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("上传角色参考图"), { target: { files: [file] } });
+    expect(screen.getByText("参考图只用于生成资产图，分镜和视频使用的是资产图")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    rerender(
+      <CharacterCard name="Hero" character={{ ...character, reference_image: "characters/refs/Hero.png" }}
+        projectName="demo" onSave={onSave} onGenerate={onGenerate} />,
+    );
+    expect(await screen.findByText("参考图已更新，点「重新生成资产图」后才会生效")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成资产图" }));
+    expect(onGenerate).toHaveBeenCalledWith("Hero");
+    expect(screen.getByText("参考图只用于生成资产图，分镜和视频使用的是资产图")).toBeInTheDocument();
+  });
+
+  it("keeps the saved-reference prompt when fingerprints are dropped, clears it when the sheet is replaced", async () => {
+    useProjectsStore.setState({ assetFingerprints: { "characters/Hero.png": 100 } });
+    const onSave = vi.fn().mockImplementation(async () => {
+      useProjectsStore.setState({ assetFingerprints: {} });
+    });
+    const character = {
+      description: "hero desc",
+      voice_style: "warm",
+      character_sheet: "characters/Hero.png",
+      reference_image: "characters/refs/Hero.png",
+    };
+    render(
+      <CharacterCard name="Hero" character={character} projectName="demo"
+        onSave={onSave} onGenerate={vi.fn()} />,
+    );
+    const file = new File(["ref"], "hero.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("上传角色参考图"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    expect(await screen.findByText("参考图已更新，点「重新生成资产图」后才会生效")).toBeInTheDocument();
+
+    act(() => {
+      useProjectsStore.setState({ assetFingerprints: { "characters/Hero.png": 500 } });
+    });
+    expect(screen.getByText("参考图只用于生成资产图，分镜和视频使用的是资产图")).toBeInTheDocument();
+  });
+
+  it("flags a saved reference newer than the sheet by file fingerprint", () => {
+    const character = {
+      description: "hero desc",
+      voice_style: "warm",
+      character_sheet: "characters/Hero.png",
+      reference_image: "characters/refs/Hero.png",
+    };
+    useProjectsStore.setState({
+      assetFingerprints: { "characters/Hero.png": 100, "characters/refs/Hero.png": 200 },
+    });
+    const { unmount } = render(
+      <CharacterCard name="Hero" character={character} projectName="demo"
+        onSave={vi.fn()} onGenerate={vi.fn()} />,
+    );
+    expect(screen.getByText("参考图已更新，点「重新生成资产图」后才会生效")).toBeInTheDocument();
+    unmount();
+
+    useProjectsStore.setState({
+      assetFingerprints: { "characters/Hero.png": 300, "characters/refs/Hero.png": 200 },
+    });
+    render(
+      <CharacterCard name="Hero" character={character} projectName="demo"
+        onSave={vi.fn()} onGenerate={vi.fn()} />,
+    );
+    expect(screen.getByText("参考图只用于生成资产图，分镜和视频使用的是资产图")).toBeInTheDocument();
   });
 
   it("disables add-to-library while an image_edit/generation task is in flight", () => {

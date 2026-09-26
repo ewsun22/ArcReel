@@ -291,6 +291,8 @@ export default {
   'unsaved_reference': '待保存参考图',
   'saved_reference': '已保存参考图',
   'upload_reference': '上传参考图',
+  'reference_sheet_hint': '参考图只用于生成资产图，分镜和视频使用的是资产图',
+  'reference_sheet_stale': '参考图已更新，点「重新生成资产图」后才会生效',
   'description': '描述',
   'character_desc_placeholder': '输入角色描述...',
   'scene_desc_placeholder': '输入场景描述...',
