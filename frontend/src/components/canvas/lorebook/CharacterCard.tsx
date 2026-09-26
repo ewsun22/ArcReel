@@ -155,10 +155,20 @@ export function CharacterCard({
   }, [character.description, character.voice_style]);
 
   useEffect(() => {
-    // 角色立绘变化时重置图片加载错误标记；资产图已换新，参考图待生效提示随之撤下
+    // 角色立绘变化时重置图片加载错误标记
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setImgError(false);
-    setReferenceSavedSinceSheet(false);
+  }, [character.character_sheet, sheetFp]);
+
+  const lastSheetRef = useRef({ path: character.character_sheet, fp: sheetFp });
+  useEffect(() => {
+    // 资产图换新（路径变化，或指纹变成新的非空值）时撤下参考图待生效提示；
+    // 指纹被清空不算换新，项目重载可能只是丢了指纹
+    const last = lastSheetRef.current;
+    lastSheetRef.current = { path: character.character_sheet, fp: sheetFp };
+    if (character.character_sheet !== last.path || (sheetFp != null && sheetFp !== last.fp)) {
+      setReferenceSavedSinceSheet(false);
+    }
   }, [character.character_sheet, sheetFp]);
 
   useEffect(() => {
@@ -300,7 +310,11 @@ export function CharacterCard({
         referenceFile,
         audioFile,
       });
-      if (savingReference) setReferenceSavedSinceSheet(true);
+      if (savingReference) {
+        // 同名替换时参考图路径不变，靠路径变化清不掉待保存状态，保存完成即清
+        clearPendingReference();
+        setReferenceSavedSinceSheet(true);
+      }
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CharacterCard } from "./CharacterCard";
 import { API } from "@/api";
@@ -143,6 +143,32 @@ describe("CharacterCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "重新生成资产图" }));
     expect(onGenerate).toHaveBeenCalledWith("Hero");
+    expect(screen.getByText("参考图只用于生成资产图，分镜和视频使用的是资产图")).toBeInTheDocument();
+  });
+
+  it("keeps the saved-reference prompt when fingerprints are dropped, clears it when the sheet is replaced", async () => {
+    useProjectsStore.setState({ assetFingerprints: { "characters/Hero.png": 100 } });
+    const onSave = vi.fn().mockImplementation(async () => {
+      useProjectsStore.setState({ assetFingerprints: {} });
+    });
+    const character = {
+      description: "hero desc",
+      voice_style: "warm",
+      character_sheet: "characters/Hero.png",
+      reference_image: "characters/refs/Hero.png",
+    };
+    render(
+      <CharacterCard name="Hero" character={character} projectName="demo"
+        onSave={onSave} onGenerate={vi.fn()} />,
+    );
+    const file = new File(["ref"], "hero.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("上传角色参考图"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    expect(await screen.findByText("参考图已更新，点「重新生成资产图」后才会生效")).toBeInTheDocument();
+
+    act(() => {
+      useProjectsStore.setState({ assetFingerprints: { "characters/Hero.png": 500 } });
+    });
     expect(screen.getByText("参考图只用于生成资产图，分镜和视频使用的是资产图")).toBeInTheDocument();
   });
 
