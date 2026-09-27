@@ -97,4 +97,19 @@ describe("ProductCard", () => {
     expect(screen.queryByTestId("version-time-machine")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+
+  it("saves unsaved product fields before generating", async () => {
+    const calls: string[] = [];
+    const onUpdate = vi.fn(async () => {
+      calls.push("save");
+    });
+    const onGenerate = vi.fn(() => calls.push("generate"));
+    render(<ProductCard name="A" product={product} projectName="demo"
+      onUpdate={onUpdate} onGenerate={onGenerate} />);
+    fireEvent.change(screen.getByDisplayValue("限量款背包"), { target: { value: "新描述" } });
+    fireEvent.click(screen.getByRole("button", { name: /生成/ }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith("A"));
+    expect(onUpdate).toHaveBeenCalledWith("A", expect.objectContaining({ description: "新描述" }));
+    expect(calls).toEqual(["save", "generate"]);
+  });
 });

@@ -15,7 +15,7 @@ import { GalleryEmptyState } from "./GalleryEmptyState";
 interface Props {
   projectName: string;
   props: Record<string, Prop>;
-  onUpdateProp: (name: string, updates: Partial<Prop>) => void;
+  onUpdateProp: (name: string, updates: Partial<Prop>) => void | Promise<void>;
   onGenerateProp: (name: string) => void;
   onAddProp: (name: string, description: string) => Promise<void>;
   onRestorePropVersion?: () => Promise<void> | void;

@@ -14,7 +14,7 @@ import { GalleryEmptyState } from "./GalleryEmptyState";
 interface Props {
   projectName: string;
   products: Record<string, Product>;
-  onUpdateProduct: (name: string, updates: Partial<Product>) => void;
+  onUpdateProduct: (name: string, updates: Partial<Product>) => void | Promise<void>;
   onGenerateProduct: (name: string) => void;
   onAddProduct: (name: string, description: string, brand: string) => Promise<void>;
   onRestoreProductVersion?: () => Promise<void> | void;

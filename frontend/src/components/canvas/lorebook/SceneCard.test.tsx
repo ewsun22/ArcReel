@@ -204,4 +204,31 @@ describe("SceneCard", () => {
     );
     expect(screen.getByRole("button", { name: /生成/ })).toBeInTheDocument();
   });
+
+  it("saves an unsaved description before generating", async () => {
+    const calls: string[] = [];
+    const onUpdate = vi.fn(async () => {
+      calls.push("save");
+    });
+    const onGenerate = vi.fn(() => calls.push("generate"));
+    render(<SceneCard name="A" scene={scene} projectName="demo"
+      onUpdate={onUpdate} onGenerate={onGenerate} />);
+    fireEvent.change(screen.getByDisplayValue("阴森古朴"), { target: { value: "新描述" } });
+    fireEvent.click(screen.getByRole("button", { name: /生成/ }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith("A"));
+    expect(onUpdate).toHaveBeenCalledWith("A", { description: "新描述" });
+    expect(calls).toEqual(["save", "generate"]);
+  });
+
+  it("does not generate when saving the draft fails", async () => {
+    const onUpdate = vi.fn().mockRejectedValue(new Error("boom"));
+    const onGenerate = vi.fn();
+    render(<SceneCard name="A" scene={scene} projectName="demo"
+      onUpdate={onUpdate} onGenerate={onGenerate} />);
+    fireEvent.change(screen.getByDisplayValue("阴森古朴"), { target: { value: "新描述" } });
+    fireEvent.click(screen.getByRole("button", { name: /生成/ }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
 });

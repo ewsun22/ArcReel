@@ -15,7 +15,7 @@ import { GalleryEmptyState } from "./GalleryEmptyState";
 interface Props {
   projectName: string;
   scenes: Record<string, Scene>;
-  onUpdateScene: (name: string, updates: Partial<Scene>) => void;
+  onUpdateScene: (name: string, updates: Partial<Scene>) => void | Promise<void>;
   onGenerateScene: (name: string) => void;
   onAddScene: (name: string, description: string) => Promise<void>;
   onRestoreSceneVersion?: () => Promise<void> | void;
