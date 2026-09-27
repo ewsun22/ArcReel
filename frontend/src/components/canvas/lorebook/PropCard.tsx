@@ -24,7 +24,8 @@ interface PropCardProps {
   name: string;
   prop: Prop;
   projectName: string;
-  onUpdate: (name: string, updates: Partial<Prop>) => void;
+  /** 保存失败时 reject（错误已由上游提示）。 */
+  onUpdate: (name: string, updates: Partial<Prop>) => void | Promise<void>;
   onGenerate: (name: string) => void;
   onRestoreVersion?: () => void | Promise<void>;
   onReload?: () => void | Promise<unknown>;
@@ -112,8 +113,22 @@ export function PropCard({
     autoResize();
   }, [description, autoResize]);
 
+  const saveDescription = () => Promise.resolve(onUpdate(name, { description }));
+
   const handleSave = () => {
-    onUpdate(name, { description });
+    void saveDescription().catch(() => undefined);
+  };
+
+  // 生成读的是已保存的描述；有未保存修改时先保存，保存失败则不生成。
+  const handleGenerate = async () => {
+    if (isDirty) {
+      try {
+        await saveDescription();
+      } catch {
+        return;
+      }
+    }
+    onGenerate(name);
   };
 
   const sheetUrl = prop.prop_sheet
@@ -295,7 +310,7 @@ export function PropCard({
 
       {readOnly ? null : (
         <GenerateButton
-          onClick={() => onGenerate(name)}
+          onClick={() => void handleGenerate()}
           loading={generating}
           label={prop.prop_sheet ? t("regenerate_design") : t("generate_design")}
           className="w-full justify-center"

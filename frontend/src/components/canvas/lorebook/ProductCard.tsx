@@ -23,7 +23,8 @@ interface ProductCardProps {
   name: string;
   product: Product;
   projectName: string;
-  onUpdate: (name: string, updates: Partial<Product>) => void;
+  /** 保存失败时 reject（错误已由上游提示）。 */
+  onUpdate: (name: string, updates: Partial<Product>) => void | Promise<void>;
   onGenerate: (name: string) => void;
   onRestoreVersion?: () => void | Promise<void>;
   onReload?: () => void | Promise<unknown>;
@@ -157,12 +158,29 @@ export function ProductCard({
     autoResize();
   }, [description, autoResize]);
 
+  const saveDraft = () =>
+    Promise.resolve(
+      onUpdate(name, {
+        description,
+        brand,
+        selling_points: parsedSellingPoints,
+      }),
+    );
+
   const handleSave = () => {
-    onUpdate(name, {
-      description,
-      brand,
-      selling_points: parsedSellingPoints,
-    });
+    void saveDraft().catch(() => undefined);
+  };
+
+  // 生成读的是已保存的商品信息；有未保存修改时先保存，保存失败则不生成。
+  const handleGenerate = async () => {
+    if (isDirty) {
+      try {
+        await saveDraft();
+      } catch {
+        return;
+      }
+    }
+    onGenerate(name);
   };
 
   const sheetUrl = product.product_sheet
@@ -427,7 +445,7 @@ export function ProductCard({
 
       {readOnly ? null : (
       <GenerateButton
-        onClick={() => onGenerate(name)}
+        onClick={() => void handleGenerate()}
         loading={generating}
         label={product.product_sheet ? t("dashboard:regenerate_design") : t("dashboard:generate_design")}
         className="w-full justify-center"

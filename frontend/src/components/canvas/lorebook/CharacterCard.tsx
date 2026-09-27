@@ -300,7 +300,8 @@ export function CharacterCard({
     }
   };
 
-  const handleSave = async () => {
+  /** 保存草稿；失败时上游已提示，返回 false。 */
+  const handleSave = async (): Promise<boolean> => {
     const savingReference = referenceFile !== null;
     setSaving(true);
     try {
@@ -315,12 +316,17 @@ export function CharacterCard({
         clearPendingReference();
         setReferenceSavedSinceSheet(true);
       }
+      return true;
+    } catch {
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const handleGenerate = () => {
+  // 生成读的是已保存的描述；有未保存修改时先保存，否则会按旧描述出图（「查看提示词」却显示草稿）。
+  const handleGenerate = async () => {
+    if (isDirty && !(await handleSave())) return;
     setReferenceSavedSinceSheet(false);
     onGenerate(name);
   };
@@ -798,7 +804,7 @@ export function CharacterCard({
       {readOnly ? null : (
       <div className="mt-4">
         <GenerateButton
-          onClick={handleGenerate}
+          onClick={() => void handleGenerate()}
           loading={generating}
           label={character.character_sheet ? t("regenerate_design") : t("generate_design")}
           className={`w-full justify-center${

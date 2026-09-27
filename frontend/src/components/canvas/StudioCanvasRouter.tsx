@@ -430,6 +430,7 @@ export function StudioCanvasRouter() {
       useAppStore.getState().pushToast(tRef.current("character_updated_toast", { name }), "success");
     } catch (err) {
       useAppStore.getState().pushToast(tRef.current("update_character_failed", { message: errMsg(err) }), "error");
+      throw err; // 卡片消费：保存失败时不接着生成
     } finally {
       // 三步写操作顺序执行，任一步失败时前面已持久化的变更（描述/参考图）也要反映到本地
       // store，否则用户会误以为整个保存失败而重复提交
@@ -480,6 +481,7 @@ export function StudioCanvasRouter() {
       await refreshProject();
     } catch (err) {
       useAppStore.getState().pushToast(tRef.current("update_scene_failed", { message: errMsg(err) }), "error");
+      throw err; // 卡片消费：保存失败时不接着生成
     }
   }, [currentProjectName, refreshProject]);
 
@@ -512,6 +514,7 @@ export function StudioCanvasRouter() {
       await refreshProject();
     } catch (err) {
       useAppStore.getState().pushToast(tRef.current("update_prop_failed", { message: errMsg(err) }), "error");
+      throw err; // 卡片消费：保存失败时不接着生成
     }
   }, [currentProjectName, refreshProject]);
 
@@ -544,6 +547,7 @@ export function StudioCanvasRouter() {
       await refreshProject();
     } catch (err) {
       useAppStore.getState().pushToast(tRef.current("update_product_failed", { message: errMsg(err) }), "error");
+      throw err; // 卡片消费：保存失败时不接着生成
     }
   }, [currentProjectName, refreshProject]);
 
@@ -584,21 +588,12 @@ export function StudioCanvasRouter() {
   const handleGenerateCharacterVoid = useCallback((...args: Parameters<typeof handleGenerateCharacter>) => {
     void handleGenerateCharacter(...args).catch(console.error);
   }, [handleGenerateCharacter]);
-  const handleUpdateSceneVoid = useCallback((...args: Parameters<typeof handleUpdateScene>) => {
-    void handleUpdateScene(...args).catch(console.error);
-  }, [handleUpdateScene]);
   const handleGenerateSceneVoid = useCallback((...args: Parameters<typeof handleGenerateScene>) => {
     void handleGenerateScene(...args).catch(console.error);
   }, [handleGenerateScene]);
-  const handleUpdatePropVoid = useCallback((...args: Parameters<typeof handleUpdateProp>) => {
-    void handleUpdateProp(...args).catch(console.error);
-  }, [handleUpdateProp]);
   const handleGeneratePropVoid = useCallback((...args: Parameters<typeof handleGenerateProp>) => {
     void handleGenerateProp(...args).catch(console.error);
   }, [handleGenerateProp]);
-  const handleUpdateProductVoid = useCallback((...args: Parameters<typeof handleUpdateProduct>) => {
-    void handleUpdateProduct(...args).catch(console.error);
-  }, [handleUpdateProduct]);
   const handleGenerateProductVoid = useCallback((...args: Parameters<typeof handleGenerateProduct>) => {
     void handleGenerateProduct(...args).catch(console.error);
   }, [handleGenerateProduct]);
@@ -659,7 +654,7 @@ export function StudioCanvasRouter() {
           projectName={currentProjectName}
           scenes={currentProjectData?.scenes ?? {}}
           readOnly={demoMode}
-          onUpdateScene={handleUpdateSceneVoid}
+          onUpdateScene={handleUpdateScene}
           onGenerateScene={handleGenerateSceneVoid}
           onAddScene={handleAddSceneSubmit}
           onRestoreSceneVersion={handleRestoreAsset}
@@ -674,7 +669,7 @@ export function StudioCanvasRouter() {
           projectName={currentProjectName}
           props={currentProjectData?.props ?? {}}
           readOnly={demoMode}
-          onUpdateProp={handleUpdatePropVoid}
+          onUpdateProp={handleUpdateProp}
           onGenerateProp={handleGeneratePropVoid}
           onAddProp={handleAddPropSubmit}
           onRestorePropVersion={handleRestoreAsset}
@@ -689,7 +684,7 @@ export function StudioCanvasRouter() {
           projectName={currentProjectName}
           products={currentProjectData?.products ?? {}}
           readOnly={demoMode}
-          onUpdateProduct={handleUpdateProductVoid}
+          onUpdateProduct={handleUpdateProduct}
           onGenerateProduct={handleGenerateProductVoid}
           onAddProduct={handleAddProductSubmit}
           onRestoreProductVersion={handleRestoreAsset}
