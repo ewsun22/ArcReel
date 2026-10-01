@@ -141,8 +141,12 @@ describe("CharacterCard", () => {
     );
     expect(await screen.findByText("参考图已更新，点「重新生成资产图」后才会生效")).toBeInTheDocument();
 
+    // 已有资产图时，生成前先问服务端是否过期；不过期直接生成。
+    vi.spyOn(API, "getAssetRegenerationImpact").mockResolvedValue({
+      stale: false, storyboards: 0, videos: 0, derivatives: 0,
+    });
     fireEvent.click(screen.getByRole("button", { name: "重新生成资产图" }));
-    expect(onGenerate).toHaveBeenCalledWith("Hero");
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith("Hero"));
     expect(screen.getByText("参考图只用于生成资产图，分镜和视频使用的是资产图")).toBeInTheDocument();
   });
 

@@ -14,7 +14,11 @@ import { useProjectsStore } from "@/stores/projects-store";
 import { errMsg } from "@/utils/async";
 import { rejectIfAssetBusy } from "./assetBusyGuard";
 import { EditableAssetName } from "./EditableAssetName";
-import type { Prop } from "@/types";
+import { MergeAssetMenu } from "./MergeAssetMenu";
+import { AssetAliasesField } from "./AssetAliasesField";
+import { AssetSheetStaleBadge, MissingDescriptionChip, hasUsableDescription, sheetIsPending } from "./AssetSheetStatusBadge";
+import { useStaleRegenerateConfirm } from "./useStaleRegenerateConfirm";
+import type { AssetSheetStatusRow, Prop } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -30,6 +34,8 @@ interface PropCardProps {
   onRestoreVersion?: () => void | Promise<void>;
   onReload?: () => void | Promise<unknown>;
   generating?: boolean;
+  /** 产物清单对这张资产图的判定；未取到时按项目数据展示。 */
+  sheetStatus?: AssetSheetStatusRow;
   /** 只读展示（引导演示项目）：不渲染上传 / 编辑 / 入库 / 版本 / 生成入口，文本字段只读。 */
   readOnly?: boolean;
 }
@@ -55,6 +61,7 @@ export function PropCard({
   onRestoreVersion,
   onReload,
   generating = false,
+  sheetStatus,
   readOnly = false,
 }: PropCardProps) {
   const { t } = useTranslation(["dashboard", "assets"]);
@@ -87,14 +94,12 @@ export function PropCard({
   const isDirty = description !== prop.description;
 
   useEffect(() => {
-    // 上游道具描述变化时同步本地草稿
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 上游道具描述变化时同步本地草稿
     setDescription(prop.description);
   }, [prop.description]);
 
   useEffect(() => {
-    // 道具立绘变化时重置图片加载错误标记
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 道具立绘变化时重置图片加载错误标记
     setImgError(false);
   }, [prop.prop_sheet, sheetFp]);
 
@@ -128,12 +133,22 @@ export function PropCard({
         return;
       }
     }
-    onGenerate(name);
+    staleConfirm.request();
   };
 
-  const sheetUrl = prop.prop_sheet
+  const sheetUrl = prop.prop_sheet && !sheetIsPending(sheetStatus)
     ? API.getFileUrl(projectName, prop.prop_sheet, sheetFp)
     : null;
+  // 生成前会先保存草稿，所以按输入框里的描述判断能否生成。
+  const descriptionMissing = !hasUsableDescription(description);
+  const staleConfirm = useStaleRegenerateConfirm({
+    projectName,
+    assetType: "prop",
+    name,
+    status: sheetStatus,
+    hasSheet: Boolean(prop.prop_sheet),
+    onGenerate: () => onGenerate(name),
+  });
 
   return (
     <div
@@ -230,6 +245,13 @@ export function PropCard({
             iconOnly
             busy={generating || uploadingSheet}
           />
+          <MergeAssetMenu
+            projectName={projectName}
+            assetType="prop"
+            name={name}
+            description={prop.description}
+            busy={generating || uploadingSheet}
+          />
         </div>
         )}
       </div>
@@ -238,7 +260,7 @@ export function PropCard({
       <div className="mb-4">
         <CapsLabel>{t("prop_design")}</CapsLabel>
         <div
-          className="mt-1.5 overflow-hidden rounded-lg"
+          className="relative mt-1.5 overflow-hidden rounded-lg"
           style={{ border: "1px solid var(--color-hairline-soft)" }}
         >
           <PreviewableImageFrame
@@ -264,12 +286,16 @@ export function PropCard({
               )}
             </AspectFrame>
           </PreviewableImageFrame>
+          {sheetUrl && !imgError && <AssetSheetStaleBadge status={sheetStatus} />}
         </div>
       </div>
 
       {/* ---- Description ---- */}
       <div className="flex items-center justify-between gap-2">
-        <CapsLabel htmlFor={descId}>{t("description")}</CapsLabel>
+        <span className="flex items-center gap-1.5">
+          <CapsLabel htmlFor={descId}>{t("description")}</CapsLabel>
+          {descriptionMissing && <MissingDescriptionChip />}
+        </span>
         {readOnly ? null : (
           <PromptPreviewButton
             title={t("assets:prompt_preview_title", { name })}
@@ -291,6 +317,14 @@ export function PropCard({
         placeholder={t("prop_desc_placeholder")}
       />
 
+      <AssetAliasesField
+        projectName={projectName}
+        name={name}
+        assetType="prop"
+        aliases={prop.aliases ?? []}
+        readOnly={readOnly}
+      />
+
       {isDirty && !readOnly && (
         <button
           type="button"
@@ -309,13 +343,17 @@ export function PropCard({
       )}
 
       {readOnly ? null : (
-        <GenerateButton
-          onClick={() => void handleGenerate()}
-          loading={generating}
-          label={prop.prop_sheet ? t("regenerate_design") : t("generate_design")}
-          className="w-full justify-center"
-        />
+        <span className="block" title={descriptionMissing ? t("assets:sheet_description_required") : undefined}>
+          <GenerateButton
+            onClick={() => void handleGenerate()}
+            loading={generating}
+            disabled={descriptionMissing}
+            label={prop.prop_sheet ? t("regenerate_design") : t("generate_design")}
+            className="w-full justify-center"
+          />
+        </span>
       )}
+      {staleConfirm.dialog}
     </div>
   );
 }
