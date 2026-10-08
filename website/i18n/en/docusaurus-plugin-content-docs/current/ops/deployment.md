@@ -175,7 +175,6 @@ The default deployment examples currently include these core variables:
 | `DATABASE_URL` | Default SQLite path | Production Compose sets the PostgreSQL URL automatically |
 | `ARCREEL_DATA_DIR` | `projects` | Data root; projects, the default SQLite database, logs, and Vertex credentials all live under it |
 | `CORS_ORIGINS` | Wildcard | When narrowed to an allowlist, browser MCP client origins must be listed too |
-| `MCP_PUBLIC_URL` | `http://localhost:1241/mcp` | Optional; only OAuth discovery-based MCP clients need it |
 | `ARCREEL_OFFICIAL_SERVICE_URL` | Built-in official service address | The official service behind market install counts, ratings, and submissions; set it to empty to turn it off entirely, leaving the market to read market sources only |
 
 Notes:
@@ -187,11 +186,13 @@ Notes:
 - File logs are always written to `logs/` under the data root. The old `ARCREEL_LOG_DIR` variable no longer takes effect; if it is still set, startup logs a one-time notice. Set `ARCREEL_LOG_FILE_DISABLED=true` if you only want logs on stdout.
 - Third-party model API keys are normally managed on the ArcReel Settings page. Do not include them in public documentation.
 
-The remote MCP endpoint is `/mcp` and always requires an API Key with an `arc-` prefix; it never permits anonymous access, even when `AUTH_ENABLED=false`. Remote access needs no extra `MCP_*` configuration: paste the endpoint URL and API Key shown in the Settings page's "External agent access" dialog into your client, and connect through an HTTPS reverse proxy, VPN, or secure tunnel that preserves long-lived SSE connections.
+The remote MCP endpoint is `/mcp` and always requires an API Key with an `arc-` prefix; it never permits anonymous access, even when `AUTH_ENABLED=false`. Remote access needs no extra `MCP_*` configuration: paste the endpoint URL shown under "External agent access" in Settings, together with an API Key created under "Access tokens", into your client, and connect through an HTTPS reverse proxy, VPN, or secure tunnel that preserves long-lived SSE connections.
 
 The server does not validate the request `Host` header; the endpoint boundary rests on the API Key enforced on every request. Host ownership belongs to the deployment: restrict `server_name` (Nginx) or the equivalent rule on your reverse proxy so only requests for the expected domain reach ArcReel.
 
-Browser MCP clients need no configuration either while `CORS_ORIGINS` stays at its permissive default; once you narrow it to an allowlist, add the client Origin to it as well. That single allowlist governs both the application API and the MCP endpoint; there is no second MCP-specific list. `MCP_PUBLIC_URL` only fills the OAuth protected-resource metadata (RFC 9728) and the 401 challenge that discovery-based clients read; clients that connect with a Bearer token, such as Claude Code and codex, never use it and can leave it unset.
+Browser MCP clients need no configuration either while `CORS_ORIGINS` stays at its permissive default; once you narrow it to an allowlist, add the client Origin to it as well. That single allowlist governs both the application API and the MCP endpoint; there is no second MCP-specific list.
+
+Remote MCP offers no OAuth authorization and publishes no OAuth protected-resource metadata (RFC 9728). Clients that only support OAuth discovery and cannot be given a Bearer credential cannot connect.
 
 ArcReel's sandbox requires provider secrets to be absent from the parent process environment. If any of the following credential environment variables has a non-empty value, the service refuses to start and prompts you to move the credential to the Web UI Settings page:
 

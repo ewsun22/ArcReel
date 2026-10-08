@@ -318,6 +318,9 @@ class OptionsAssembler:
         provider_env.update(
             {
                 "ARCREEL_EMBEDDED_AGENT": "1",
+                # 订阅 session_state_changed 帧：后台子智能体结束后 CLI 还欠一轮时持续报 running，
+                # 与 SDK 判定 run 是否结束的依据相同；会话层据此决定能否断开 CLI。
+                "CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS": "1",
                 "ARCREEL_API_BASE": (os.environ.get("ARCREEL_API_BASE") or "http://127.0.0.1:1241/api/v1").rstrip("/"),
                 "ARCREEL_API_TOKEN": (
                     create_token("embedded-agent", expiry_seconds=_EMBEDDED_AGENT_TOKEN_EXPIRY_SECONDS)
@@ -358,6 +361,9 @@ class OptionsAssembler:
                 type="preset",
                 preset="claude_code",
                 append=await self._build_append_prompt(project_name, locale=locale),
+                # 会话首轮记录系统提示，之后每轮（含 resume）原样沿用：记忆等动态段的变化
+                # 不再打断 prompt cache。代价是 append 在会话内固定，resume 不会按新 locale 重建。
+                snapshot=True,
             ),
             include_partial_messages=True,
             max_buffer_size=CLI_STDOUT_MAX_BUFFER_BYTES,

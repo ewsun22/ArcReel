@@ -31,6 +31,7 @@ import type {
   ProjectChangeBatchPayload,
   ProjectEventSnapshotPayload,
   ProjectDeletedPayload,
+  AssistantSessionResumedPayload,
   GetSystemConfigResponse,
   GetSystemVersionResponse,
   NarrationDefaultsResponse,
@@ -118,7 +119,7 @@ import type {
   PresentationRequestOptions,
   PresentationResourceType,
 } from "@/types/presentation";
-import type { Asset, AssetType, AssetCreatePayload, AssetUpdatePayload } from "@/types/asset";
+import type { Asset, AssetType, AssetCreatePayload, AssetListPage, AssetUpdatePayload } from "@/types/asset";
 import type { AgentMemoryOverview, AgentMemoryScope } from "@/types/agent-memory";
 import type { EpisodeNextStep, WorkflowPlan, WorkflowPlanRequest, WorkflowStatus } from "@/types/workflow";
 import type {
@@ -167,6 +168,7 @@ import type {
   TestConnectionResponse,
   UpdateAgentCredentialRequest,
 } from "@/types/agent-credential";
+import i18n from "@/i18n";
 import { openSseStream, type SseStreamHandle } from "@/utils/sse-stream";
 import {
   API_BASE,
@@ -185,6 +187,7 @@ import {
 } from "./api/errors";
 import type {
   AgentProfileStatus,
+  AssetDeletionPreview,
   AssetMergeResult,
   AssetRenameResult,
   AssistantEntriesStreamOptions,
@@ -215,6 +218,7 @@ export {
 } from "./api/errors";
 export type {
   AgentProfileStatus,
+  AssetDeletionPreview,
   AssetMergeEpisodeImpact,
   AssetMergeResult,
   AssetRenameResult,
@@ -362,8 +366,8 @@ class API {
 
   // ==================== 系统配置 ====================
 
-  static async getSystemConfig(): Promise<GetSystemConfigResponse> {
-    return this.request("/system/config");
+  static async getSystemConfig(options: { signal?: AbortSignal } = {}): Promise<GetSystemConfigResponse> {
+    return this.request("/system/config", { signal: options.signal });
   }
 
   /**
@@ -377,8 +381,10 @@ class API {
   }
 
   /** 新建 TTS 项目的预填值（全局默认的 TTS 模型、音色与语速）。 */
-  static async getNarrationDefaults(): Promise<NarrationDefaultsResponse> {
-    return this.request("/system/narration-defaults");
+  static async getNarrationDefaults(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<NarrationDefaultsResponse> {
+    return this.request("/system/narration-defaults", { signal: options.signal });
   }
 
   /** 所选 TTS 模型（provider/model）的能力，目前只回答是否支持配音语速。 */
@@ -457,8 +463,8 @@ class API {
 
   // ==================== 项目管理 ====================
 
-  static async listProjects(): Promise<{ projects: ProjectSummary[] }> {
-    return this.request("/projects");
+  static async listProjects(options: { signal?: AbortSignal } = {}): Promise<{ projects: ProjectSummary[] }> {
+    return this.request("/projects", { signal: options.signal });
   }
 
   static async createProject(
@@ -486,7 +492,7 @@ class API {
     updates: Partial<ProjectData> & { clear_style_image?: boolean }
   ): Promise<{ success: boolean; project: ProjectData }> {
     if ("content_mode" in updates) {
-      throw new Error("项目创建后不支持修改 content_mode");
+      throw new Error(i18n.t("errors:content_mode_immutable"));
     }
     return this.request(`/projects/${encodeURIComponent(name)}`, {
       method: "PATCH",
@@ -494,8 +500,11 @@ class API {
     });
   }
 
-  static async getAgentProfileStatus(name: string): Promise<AgentProfileStatus> {
-    return this.request(`/projects/${encodeURIComponent(name)}/agent-profile`);
+  static async getAgentProfileStatus(
+    name: string,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<AgentProfileStatus> {
+    return this.request(`/projects/${encodeURIComponent(name)}/agent-profile`, { signal: options.signal });
   }
 
   static async resetAgentProfile(name: string): Promise<AgentProfileStatus> {
@@ -525,7 +534,7 @@ class API {
   ): Promise<string> {
     const url = `${agentMemoryBase(scope)}/files/${encodeURIComponent(filename)}`;
     const response = await fetch(`${API_BASE}${url}`, withAuth(url, { signal: options.signal }));
-    await throwIfNotOk(response, "获取记忆文件失败");
+    await throwIfNotOk(response, i18n.t("errors:memory_file_load_failed"));
     return response.text();
   }
 
@@ -544,7 +553,7 @@ class API {
         body: content,
       })
     );
-    await throwIfNotOk(response, "保存记忆文件失败");
+    await throwIfNotOk(response, i18n.t("errors:memory_file_save_failed"));
     return response.json() as Promise<{ name: string }>;
   }
 
@@ -812,9 +821,8 @@ class API {
       const payload = await response
         .json()
         .catch(() => ({ detail: response.statusText, errors: [], warnings: [] })) as ImportErrorPayload;
-      const error = new Error(
-        typeof payload.detail === "string" ? payload.detail : "导入失败"
-      ) as Error & {
+      const detail = typeof payload.detail === "string" ? payload.detail : i18n.t("errors:import_failed");
+      const error = new Error(detail) as Error & {
         status?: number;
         detail?: string;
         errors?: string[];
@@ -823,7 +831,7 @@ class API {
         diagnostics?: ImportFailureDiagnostics;
       };
       error.status = response.status;
-      error.detail = typeof payload.detail === "string" ? payload.detail : "导入失败";
+      error.detail = detail;
       error.errors = Array.isArray(payload.errors) ? payload.errors : [];
       error.warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
       if (typeof payload.conflict_project_name === "string") {
@@ -874,18 +882,6 @@ class API {
       {
         method: "PATCH",
         body: JSON.stringify(updates),
-      }
-    );
-  }
-
-  static async deleteCharacter(
-    projectName: string,
-    charName: string
-  ): Promise<SuccessResponse> {
-    return this.request(
-      `/projects/${encodeURIComponent(projectName)}/characters/${encodeURIComponent(charName)}`,
-      {
-        method: "DELETE",
       }
     );
   }
@@ -996,11 +992,13 @@ class API {
   /** 规划一批但不建任务：要生成的名单、跳过项与能算出时的预估费用。 */
   static async previewAssetSheetBatch(
     projectName: string,
-    scope: AssetSheetBatchScope
+    scope: AssetSheetBatchScope,
+    options?: { signal?: AbortSignal }
   ): Promise<AssetSheetBatchPreview> {
     return this.request(`/projects/${encodeURIComponent(projectName)}/asset-sheets/batch/preview`, {
       method: "POST",
       body: JSON.stringify(scope),
+      signal: options?.signal,
     });
   }
 
@@ -1044,11 +1042,13 @@ class API {
     projectName: string,
     assetType: AssetSheetType,
     name: string,
-    derivativeName?: string
+    derivativeName?: string,
+    options?: { signal?: AbortSignal },
   ): Promise<AssetRegenerationImpact> {
     const query = derivativeName ? `?${new URLSearchParams({ derivative_name: derivativeName })}` : "";
     return this.request(
-      `/projects/${encodeURIComponent(projectName)}/asset-sheets/${assetType}/${encodeURIComponent(name)}/regeneration-impact${query}`
+      `/projects/${encodeURIComponent(projectName)}/asset-sheets/${assetType}/${encodeURIComponent(name)}/regeneration-impact${query}`,
+      { signal: options?.signal },
     );
   }
 
@@ -1078,18 +1078,6 @@ class API {
       {
         method: "PATCH",
         body: JSON.stringify(updates),
-      }
-    );
-  }
-
-  static async deleteProjectScene(
-    projectName: string,
-    sceneName: string
-  ): Promise<SuccessResponse> {
-    return this.request(
-      `/projects/${encodeURIComponent(projectName)}/scenes/${encodeURIComponent(sceneName)}`,
-      {
-        method: "DELETE",
       }
     );
   }
@@ -1124,31 +1112,25 @@ class API {
     );
   }
 
-  static async deleteProjectProp(
-    projectName: string,
-    propName: string
-  ): Promise<SuccessResponse> {
-    return this.request(
-      `/projects/${encodeURIComponent(projectName)}/props/${encodeURIComponent(propName)}`,
-      {
-        method: "DELETE",
-      }
-    );
-  }
-
   // ==================== 项目商品管理 ====================
 
   static async addProjectProduct(
     projectName: string,
     name: string,
     description: string,
-    brand?: string
+    brand?: string,
+    sellingPoints?: string[]
   ): Promise<SuccessResponse> {
     return this.request(
       `/projects/${encodeURIComponent(projectName)}/products`,
       {
         method: "POST",
-        body: JSON.stringify(brand ? { name, description, brand } : { name, description }),
+        body: JSON.stringify({
+          name,
+          description,
+          ...(brand ? { brand } : {}),
+          ...(sellingPoints?.length ? { selling_points: sellingPoints } : {}),
+        }),
       }
     );
   }
@@ -1163,18 +1145,6 @@ class API {
       {
         method: "PATCH",
         body: JSON.stringify(updates),
-      }
-    );
-  }
-
-  static async deleteProjectProduct(
-    projectName: string,
-    productName: string
-  ): Promise<SuccessResponse> {
-    return this.request(
-      `/projects/${encodeURIComponent(projectName)}/products/${encodeURIComponent(productName)}`,
-      {
-        method: "DELETE",
       }
     );
   }
@@ -1224,6 +1194,33 @@ class API {
         }),
         signal: options.signal,
       }
+    );
+  }
+
+  /**
+   * 删除项目内资产前的引用预览：脚本与草稿里有多少处引用会在删除后悬空，按集列出。只读，
+   * 与重命名同一套扫描。删除本身不改写这些引用，也不因有引用而拒绝。
+   */
+  static async previewProjectAssetDeletion(
+    projectName: string,
+    assetType: ProjectAssetType,
+    name: string,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<AssetDeletionPreview> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectName)}/${ASSET_TYPE_PATH[assetType]}/${encodeURIComponent(name)}?dry_run=true`,
+      { method: "DELETE", signal: options.signal }
+    );
+  }
+
+  static async deleteProjectAsset(
+    projectName: string,
+    assetType: ProjectAssetType,
+    name: string
+  ): Promise<SuccessResponse> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectName)}/${ASSET_TYPE_PATH[assetType]}/${encodeURIComponent(name)}`,
+      { method: "DELETE" }
     );
   }
 
@@ -1719,7 +1716,7 @@ class API {
       // 若 detail 缺字段则视为协议异常，抛通用错误（带文件名标识）而非手搓 fallback —
       // 避免前端"猜"一个可能与后端命名规则不一致的 suggested_name 误导用户
       if (!detail?.existing || !detail?.suggested_name) {
-        throw new Error(`上传 "${file.name}" 失败：服务端返回 409 但 detail 字段不完整`);
+        throw new Error(i18n.t("errors:upload_conflict_incomplete", { filename: file.name }));
       }
       throw new ConflictError(
         detail.existing,
@@ -1728,7 +1725,7 @@ class API {
       );
     }
 
-    await throwIfNotOk(response, "上传失败");
+    await throwIfNotOk(response, i18n.t("errors:upload_failed"));
     return (await response.json()) as {
       success: boolean;
       path?: string;
@@ -1750,7 +1747,7 @@ class API {
     const formData = new FormData();
     formData.append("file", file);
     const response = await fetch(`${API_BASE}${url}`, withAuth(url, { method: "POST", body: formData }));
-    await throwIfNotOk(response, "上传失败");
+    await throwIfNotOk(response, i18n.t("errors:upload_failed"));
     return (await response.json()) as T;
   }
 
@@ -1918,7 +1915,7 @@ class API {
       `${API_BASE}${url}`,
       withAuth(url, { signal: options.signal })
     );
-    await throwIfNotOk(response, "获取文件内容失败");
+    await throwIfNotOk(response, i18n.t("errors:file_content_load_failed"));
     return response.text();
   }
 
@@ -2121,7 +2118,7 @@ class API {
     if (options.revision) formData.append("revision", options.revision);
     const url = `/projects/${encodeURIComponent(projectName)}/source-files/${encodeURIComponent(filename)}/replace`;
     const response = await fetch(`${API_BASE}${url}`, withAuth(url, { method: "POST", body: formData }));
-    await throwIfNotOk(response, "替换文件失败");
+    await throwIfNotOk(response, i18n.t("errors:file_replace_failed"));
     return (await response.json()) as SourceFileChangeResponse;
   }
 
@@ -2176,7 +2173,7 @@ class API {
         method: "DELETE",
       })
     );
-    await throwIfNotOk(response, "删除文件失败");
+    await throwIfNotOk(response, i18n.t("errors:file_delete_failed"));
     return response.json() as Promise<SuccessResponse>;
   }
 
@@ -2208,7 +2205,7 @@ class API {
       `${API_BASE}${url}`,
       withAuth(url)
     );
-    await throwIfNotOk(response, "获取草稿内容失败");
+    await throwIfNotOk(response, i18n.t("errors:stage_file_load_failed"));
     return response.text();
   }
 
@@ -2230,7 +2227,7 @@ class API {
         body: content,
       })
     );
-    await throwIfNotOk(response, "保存草稿失败");
+    await throwIfNotOk(response, i18n.t("errors:stage_file_save_failed"));
     return response.json() as Promise<SuccessResponse>;
   }
 
@@ -2674,7 +2671,7 @@ class API {
       url,
       headers: sseHeaders,
       onMessage(message) {
-        const payload = parseSseJson(message.data, "项目事件");
+        const payload = parseSseJson(message.data, "project event");
         if (!payload) return;
         switch (message.event) {
           case "snapshot":
@@ -2685,6 +2682,9 @@ class API {
             break;
           case "project_deleted":
             options.onProjectDeleted?.(payload as unknown as ProjectDeletedPayload);
+            break;
+          case "assistant_session_resumed":
+            options.onAssistantSessionResumed?.(payload as unknown as AssistantSessionResumedPayload);
             break;
           default:
             break;
@@ -2705,14 +2705,15 @@ class API {
   static async getVersions(
     projectName: string,
     resourceType: string,
-    resourceId: string
+    resourceId: string,
+    options?: { signal?: AbortSignal },
   ): Promise<{
     resource_type: string;
     resource_id: string;
     current_version: number;
     versions: VersionInfo[];
   }> {
-    return this.request(versionsResourcePath(projectName, resourceType, resourceId));
+    return this.request(versionsResourcePath(projectName, resourceType, resourceId), { signal: options?.signal });
   }
 
   /**
@@ -2765,7 +2766,7 @@ class API {
       })
     );
 
-    await throwIfNotOk(response, "上传失败");
+    await throwIfNotOk(response, i18n.t("errors:upload_failed"));
 
     return response.json() as Promise<{ success: boolean; style_image: string; style_description: string; url: string }>;
   }
@@ -2908,7 +2909,7 @@ class API {
       url: this.getAssistantEntriesStreamUrl(options.projectName, options.sessionId, options.after ?? -1),
       headers: sseHeaders,
       onMessage(message) {
-        const payload = parseSseJson(message.data, "会话");
+        const payload = parseSseJson(message.data, "session");
         if (payload) options.onEvent(message.event, payload);
       },
       onError: sseErrorHandler(options.onError),
@@ -2995,8 +2996,8 @@ class API {
   // ==================== API Key 管理 API ====================
 
   /** 列出所有 API Key（不含完整 key）。 */
-  static async listApiKeys(): Promise<ApiKeyInfo[]> {
-    return this.request("/api-keys");
+  static async listApiKeys(options: { signal?: AbortSignal } = {}): Promise<ApiKeyInfo[]> {
+    return this.request("/api-keys", { signal: options.signal });
   }
 
   /** 创建新 API Key，返回含完整 key 的响应（仅此一次）。 */
@@ -3050,8 +3051,8 @@ class API {
 
   // ==================== Provider 凭证管理 API ====================
 
-  static async listCredentials(providerId: string): Promise<{ credentials: ProviderCredential[] }> {
-    return this.request(`/providers/${encodeURIComponent(providerId)}/credentials`);
+  static async listCredentials(providerId: string, options: { signal?: AbortSignal } = {}): Promise<{ credentials: ProviderCredential[] }> {
+    return this.request(`/providers/${encodeURIComponent(providerId)}/credentials`, { signal: options.signal });
   }
 
   static async createCredential(
@@ -3097,18 +3098,18 @@ class API {
       `${API_BASE}${url}`,
       withAuth(url, { method: "POST", body: formData }),
     );
-    await throwIfNotOk(response, "上传凭证失败");
+    await throwIfNotOk(response, i18n.t("errors:credential_upload_failed"));
     return response.json() as Promise<ProviderCredential>;
   }
 
   // ==================== Agent 配置 / 凭证 API ====================
 
-  static async listAgentPresetProviders(): Promise<PresetProvidersResponse> {
-    return this.request("/agent/preset-providers");
+  static async listAgentPresetProviders(options: { signal?: AbortSignal } = {}): Promise<PresetProvidersResponse> {
+    return this.request("/agent/preset-providers", { signal: options.signal });
   }
 
-  static async listAgentCredentials(): Promise<{ credentials: AgentCredential[] }> {
-    return this.request("/agent/credentials");
+  static async listAgentCredentials(options: { signal?: AbortSignal } = {}): Promise<{ credentials: AgentCredential[] }> {
+    return this.request("/agent/credentials", { signal: options.signal });
   }
 
   static async createAgentCredential(
@@ -3167,8 +3168,8 @@ class API {
     return this.request("/custom-providers", { method: "POST", body: JSON.stringify(data) });
   }
 
-  static async getCustomProvider(id: number): Promise<CustomProviderInfo> {
-    return this.request(`/custom-providers/${id}`);
+  static async getCustomProvider(id: number, options: { signal?: AbortSignal } = {}): Promise<CustomProviderInfo> {
+    return this.request(`/custom-providers/${id}`, { signal: options.signal });
   }
 
   static async updateCustomProvider(id: number, data: Partial<Omit<CustomProviderCreateRequest, "discovery_format" | "models" | "image_max_workers" | "video_max_workers" | "audio_max_workers">>): Promise<void> {
@@ -3294,7 +3295,7 @@ class API {
   ): Promise<Blob> {
     const url = `/market/sources/${sourceId}/entries/${encodeURIComponent(slug)}/icon?v=${encodeURIComponent(version)}`;
     const response = await fetch(`${API_BASE}${url}`, withAuth(url, { signal: options.signal }));
-    await throwIfNotOk(response, "获取条目图标失败");
+    await throwIfNotOk(response, i18n.t("errors:market_icon_load_failed"));
     return response.blob();
   }
 
@@ -3418,8 +3419,8 @@ class API {
   }
 
   /** 内置声明式端点的定义原样 JSON，供「复制为我的」；Python 实现的内置端点 404。 */
-  static async getBuiltinEndpointDefinition(key: string): Promise<EndpointDefinition> {
-    return this.request(`/custom-providers/endpoints/${encodeURIComponent(key)}/definition`);
+  static async getBuiltinEndpointDefinition(key: string, options: { signal?: AbortSignal } = {}): Promise<EndpointDefinition> {
+    return this.request(`/custom-providers/endpoints/${encodeURIComponent(key)}/definition`, { signal: options.signal });
   }
 
   static async previewEndpointRequest(
@@ -3562,8 +3563,14 @@ class API {
    * @param projectName - 项目名称
    * @param gridId - Grid ID
    */
-  static async getGrid(projectName: string, gridId: string): Promise<GridGeneration> {
-    return this.request(`/projects/${encodeURIComponent(projectName)}/grids/${encodeURIComponent(gridId)}`);
+  static async getGrid(
+    projectName: string,
+    gridId: string,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<GridGeneration> {
+    return this.request(`/projects/${encodeURIComponent(projectName)}/grids/${encodeURIComponent(gridId)}`, {
+      signal: options.signal,
+    });
   }
 
   /**
@@ -3628,7 +3635,7 @@ class API {
     if (params.q) usp.set("q", params.q);
     if (params.limit) usp.set("limit", String(params.limit));
     if (params.offset) usp.set("offset", String(params.offset));
-    return this.request<{ items: Asset[] }>(`/assets?${usp.toString()}`, options);
+    return this.request<AssetListPage>(`/assets?${usp.toString()}`, options);
   }
 
   static async getAsset(id: string) {
@@ -3650,7 +3657,7 @@ class API {
       const error = (await response.json().catch(() => ({ detail: response.statusText }))) as {
         detail?: string;
       };
-      throw new Error(typeof error.detail === "string" ? error.detail : "请求失败");
+      throw new Error(typeof error.detail === "string" ? error.detail : i18n.t("errors:request_failed"));
     }
     return response.json() as Promise<{ asset: Asset }>;
   }
@@ -3673,7 +3680,7 @@ class API {
       const error = (await response.json().catch(() => ({ detail: response.statusText }))) as {
         detail?: string;
       };
-      throw new Error(typeof error.detail === "string" ? error.detail : "请求失败");
+      throw new Error(typeof error.detail === "string" ? error.detail : i18n.t("errors:request_failed"));
     }
     return response.json() as Promise<{ asset: Asset }>;
   }
