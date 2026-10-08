@@ -251,17 +251,22 @@ export function AssetDetailEditor({
             </div>
             {readOnly ? null : (
               <div className="flex flex-col gap-1.5">
-                <GenerateButton
-                  onClick={generate}
-                  loading={generating}
-                  disabled={!describable || busy}
-                  label={generateLabel}
+                {/* 参考图比资产图新时给生成按钮外圈高亮，提示重新生成后参考图才生效 */}
+                <div
+                  data-reference-stale={referenceNewerThanSheet.stale || undefined}
                   className={cn(
-                    "w-full",
-                    // 参考图比资产图新时高亮，提示重新生成后参考图才生效
-                    referenceNewerThanSheet.stale && "ring-2 ring-primary ring-offset-2 ring-offset-transparent",
+                    "rounded-md",
+                    referenceNewerThanSheet.stale && "ring-2 ring-primary ring-offset-2 ring-offset-background",
                   )}
-                />
+                >
+                  <GenerateButton
+                    onClick={generate}
+                    loading={generating}
+                    disabled={!describable || busy}
+                    label={generateLabel}
+                    className="w-full"
+                  />
+                </div>
                 {describable ? null : (
                   <p className="text-xs text-muted-foreground">{t("assets:sheet_description_required")}</p>
                 )}
@@ -424,7 +429,6 @@ function useReferenceNewerThanSheet(
     const sheet = lastSheet.current;
     lastSheet.current = { path: sheetPath ?? null, fp: sheetFp };
     if ((sheetPath ?? null) !== sheet.path || (sheetFp != null && sheetFp !== sheet.fp)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 资产图换新时撤下待生效提示
       setUploadedSinceSheet(false);
     }
   }, [sheetPath, sheetFp]);

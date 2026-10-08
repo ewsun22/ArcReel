@@ -90,7 +90,7 @@ describe("角色详情：参考图待生效", () => {
       fireEvent.change(input, { target: { files: [new File(["ref"], "ref.png", { type: "image/png" })] } });
     });
     expect(await within(sheet).findByText(STALE)).toBeInTheDocument();
-    expect(within(sheet).getByRole("button", { name: "重新生成资产图" })).toHaveClass("ring-primary");
+    expect(within(sheet).getByRole("button", { name: "重新生成资产图" }).closest("[data-reference-stale]")).not.toBeNull();
 
     act(() => useProjectsStore.getState().updateAssetFingerprints({ "characters/张翠花.png": Date.now() }));
     expect(within(sheet).getByText(HINT)).toBeInTheDocument();
