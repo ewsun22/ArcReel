@@ -23,7 +23,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from starlette.datastructures import MutableHeaders
 from starlette.types import Message, Receive, Scope, Send
 
@@ -51,7 +51,7 @@ from server.auth import ensure_auth_password, get_current_user, warn_if_auth_dis
 from server.cors_config import resolve_cors_policy
 from server.dependencies import require_project_migration_ok, require_valid_project_name
 from server.error_handlers import register_error_handlers
-from server.remote_mcp import remote_mcp_host
+from server.remote_mcp import mount_remote_mcp, remote_mcp_host
 from server.routers import (
     ad_script,
     agent_config,
@@ -492,11 +492,15 @@ async def lifespan(app: FastAPI):
     app.state.project_event_service = project_event_service
     await project_event_service.start()
     logger.info("ProjectEventService 已启动")
+    assistant.assistant_service.session_manager.set_autonomous_turn_listener(
+        project_event_service.publish_assistant_session_resumed
+    )
 
     async with remote_mcp_host.run():
         yield
 
     # Shutdown
+    assistant.assistant_service.session_manager.set_autonomous_turn_listener(None)
     project_event_service = getattr(app.state, "project_event_service", None)
     if project_event_service:
         logger.info("正在停止 ProjectEventService...")
@@ -571,7 +575,9 @@ _QUIET_SLOW_THRESHOLD_MS = 500.0
 
 
 @app.middleware("http")
-async def request_logging_middleware(request: Request, call_next):
+async def request_logging_middleware(
+    request: Request, call_next, *, quiet_slow_threshold_ms: float = _QUIET_SLOW_THRESHOLD_MS
+):
     start = time.perf_counter()
     path = request.url.path
     _skip_log = path.startswith("/assets") or path == "/health"
@@ -592,7 +598,7 @@ async def request_logging_middleware(request: Request, call_next):
         is_quiet = (
             (request.method, path) in _QUIET_POLL_ENDPOINTS
             and response.status_code < 400
-            and elapsed_ms < _QUIET_SLOW_THRESHOLD_MS
+            and elapsed_ms < quiet_slow_threshold_ms
         )
         log = logger.debug if is_quiet else logger.info
         log(
@@ -762,12 +768,7 @@ app.include_router(projects.self_auth_router, prefix="/api/v1", tags=["项目管
 app.include_router(edit_timelines.self_auth_router, prefix="/api/v1", tags=["剪辑时间线"])
 
 
-@app.api_route("/mcp", methods=["DELETE", "GET", "HEAD", "POST"], include_in_schema=False)
-async def redirect_remote_mcp() -> RedirectResponse:
-    return RedirectResponse("/mcp/", status_code=307)
-
-
-app.mount("/mcp", remote_mcp_host)
+mount_remote_mcp(app, remote_mcp_host)
 
 
 def create_generation_worker() -> GenerationWorker:

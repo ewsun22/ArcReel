@@ -56,7 +56,7 @@ function mkUnit(
 describe("UnitPreviewPanel", () => {
   it("shows placeholder when no unit is selected", () => {
     render(<UnitPreviewPanel unit={null} />);
-    expect(screen.getByText(/Select a unit|选中左侧 Unit/)).toBeInTheDocument();
+    expect(screen.getByText(/Select a unit|选中左侧的视频单元/)).toBeInTheDocument();
   });
 
   it("shows empty-video placeholder when unit has no video_clip", () => {
@@ -94,7 +94,7 @@ describe("UnitPreviewPanel", () => {
   });
 
   it("disables upload button while the unit is generating", () => {
-    const { container } = render(
+    render(
       <UnitPreviewPanel
         unit={mkUnit()}
         projectName="proj"
@@ -102,9 +102,7 @@ describe("UnitPreviewPanel", () => {
         onUploadVideo={vi.fn()}
       />,
     );
-    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
-    const button = input?.nextElementSibling as HTMLButtonElement;
-    expect(button).toBeDisabled();
+    expect(screen.getByRole("button", { name: "上传视频" })).toBeDisabled();
   });
 
   it("keeps retained narration audio visible after the unit loses narration", () => {
@@ -167,8 +165,7 @@ describe("UnitPreviewPanel", () => {
           restoring
         />,
       );
-      const uploadButton = container.querySelector<HTMLInputElement>('input[type="file"]')
-        ?.nextElementSibling as HTMLButtonElement;
+      const uploadButton = screen.getByRole("button", { name: "上传视频" });
       const generateButton = [...container.querySelectorAll("button")].find((b) =>
         b.textContent?.trim(),
       );
