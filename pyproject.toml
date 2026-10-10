@@ -1,7 +1,7 @@
 [project]
 name = "arcreel"
 # managed by release-please — do not bump manually
-version = "0.32.0"
+version = "0.33.0"
 description = "AI video generation workspace"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -170,7 +170,6 @@ ignore_imports = [
     "lib.backends.backend_assembly.assembler -> lib.custom_provider",
     "lib.backends.backend_assembly.assembler -> lib.custom_provider.loader",
     "lib.billing.cost_calculator -> lib.custom_provider",
-    "lib.db.repositories.usage_repo -> lib.custom_provider",
     "lib.db.repositories.custom_provider_repo -> lib.custom_provider",
     "lib.db.repositories.custom_provider_repo -> lib.custom_provider.endpoints",
     "lib.db.models.custom_provider -> lib.custom_provider",
