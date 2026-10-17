@@ -1,7 +1,9 @@
 """Tests for execute_video_task."""
 
+import asyncio
 import json
 import re
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -30,6 +32,7 @@ from lib.speech.narration_delivery import (
 from lib.speech.speech_composition import admit_script_unit
 from server.services.tasks import generation_tasks
 from tests.factories import make_video_request_facts, wav_bytes
+from tests.fakes import write_backend_output
 from tests.integration.server.services.tasks.generation_tasks_support import (
     FakeGenerator,
     _FakePM,
@@ -85,8 +88,8 @@ class TestGenerationTasks:
         thumbnail_path = project_path / "thumbnails" / "scene_E1S01.jpg"
 
         async def fake_extract(video_path, out_path):
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_bytes(b"thumb")
+            # 生产由 ffmpeg 子进程写缩略图，替身在工作线程里落盘，不占事件循环
+            await write_backend_output(out_path, b"thumb")
             return out_path
 
         monkeypatch.setattr(generation_tasks, "get_project_manager", lambda: fake_pm)
@@ -131,6 +134,45 @@ class TestGenerationTasks:
 
         assert result["warnings"] == [warning]
 
+    async def test_finalize_video_completes_when_cancelled_during_script_write(self, monkeypatch, tmp_path):
+        """取消落在视频落账段的剧本回写上：写完照常走完收尾并交回结果，取消不再传给选中补偿。"""
+        project_path = prepare_files(tmp_path)
+        fake_pm = _FakePM(project_path)
+        writing = threading.Event()
+        release = threading.Event()
+        original_update = fake_pm.update_scene_asset
+
+        def _blocking_update(**kwargs):
+            if kwargs["asset_type"] == "video_clip":
+                writing.set()
+                release.wait(5)
+            return original_update(**kwargs)
+
+        monkeypatch.setattr(fake_pm, "update_scene_asset", _blocking_update)
+        monkeypatch.setattr(generation_tasks, "get_project_manager", lambda: fake_pm)
+        monkeypatch.setattr(generation_tasks, "extract_video_thumbnail", AsyncMock(return_value=False))
+        task = asyncio.create_task(
+            generation_tasks.finalize_video_task(
+                project_name="demo",
+                script_file="episode_1.json",
+                project_path=project_path,
+                resource_id="E1S01",
+                version=2,
+                video_uri="uri",
+                generator=FakeGenerator(),
+            )
+        )
+        try:
+            assert await asyncio.to_thread(writing.wait, 5)
+            task.cancel()
+            await asyncio.sleep(0)
+        finally:
+            release.set()
+        result = await task
+
+        assert result["version"] == 2
+        assert [update["asset_type"] for update in fake_pm.updated_assets] == ["video_clip", "video_uri"]
+
     async def test_storyboard_worker_materializes_current_request_and_checkpoints_staged_frames(
         self,
         monkeypatch,
@@ -156,7 +198,7 @@ class TestGenerationTasks:
                 start_image = kwargs["start_image"]
                 assert isinstance(start_image, Path)
                 assert ".arcreel/tasks/task-storyboard/provider_media/" in start_image.as_posix()
-                assert start_image.read_bytes() == b"png"
+                assert await asyncio.to_thread(start_image.read_bytes) == b"png"
                 metadata = await kwargs["before_submit"]()
                 assert metadata is not None
                 submitted["metadata"] = metadata
@@ -536,7 +578,8 @@ class TestGenerationTasks:
 
         async def _drop_claim_after_staging(project_dir, task_id, inputs):
             staged = await original_stage(project_dir, task_id, inputs)
-            ProjectArtifactManifestAdapter(project_path).delete_entry(key)
+            # 模拟另一处并发撤掉认领：在工作线程里改清单，不占事件循环
+            await asyncio.to_thread(lambda: ProjectArtifactManifestAdapter(project_path).delete_entry(key))
             return staged
 
         monkeypatch.setattr(generation_tasks, "stage_provider_media_for_task", _drop_claim_after_staging)
@@ -596,8 +639,7 @@ class TestGenerationTasks:
         monkeypatch.setattr(generation_tasks, "resolve_generation_context", fake_resolve_ctx(fake_generator))
         original_stage = generation_tasks.stage_provider_media_for_task
 
-        async def _stage_then_replace_and_reactivate(project_dir, task_id, inputs):
-            staged = await original_stage(project_dir, task_id, inputs)
+        def _replace_and_reactivate() -> None:
             (project_path / "storyboards" / "scene_E1S01.png").write_bytes(b"replacement")
             register_stale_visual_claim(
                 project_path,
@@ -609,6 +651,11 @@ class TestGenerationTasks:
                 ProjectArtifactManifestAdapter(project_path).get_entry(ArtifactKey.episode_storyboard(1, "E1S01"))
                 is not None
             )
+
+        async def _stage_then_replace_and_reactivate(project_dir, task_id, inputs):
+            staged = await original_stage(project_dir, task_id, inputs)
+            # 模拟另一处并发替换分镜并重新认领：在工作线程里改盘，不占事件循环
+            await asyncio.to_thread(_replace_and_reactivate)
             return staged
 
         monkeypatch.setattr(generation_tasks, "stage_provider_media_for_task", _stage_then_replace_and_reactivate)
