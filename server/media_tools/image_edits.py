@@ -9,6 +9,8 @@ uses, so the two entry points can't diverge (see ``server/services/tasks/image_e
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -32,6 +34,7 @@ from lib.generation.generation_result import (
     GenerationTargetState,
     record_batch_outcomes,
 )
+from lib.infra.async_thread import run_sync_transaction
 from server.media_tools.context import (
     GenerationToolValue,
     ScriptFilename,
@@ -78,7 +81,7 @@ async def _i2i_provider_available(project: dict[str, Any], *, config_resolver: C
 def _build_specs(
     *,
     project: dict[str, Any],
-    project_path: Any,
+    project_path: Path,
     resource_type: str,
     edits: list[ImageEdit],
     script: dict[str, Any] | None,
@@ -222,20 +225,26 @@ async def edit_images(
         edits = request.value.edits
 
         script_filename = request.value.script_file if resource_type == "storyboard" else None
-        script: dict[str, Any] | None = None
-        if script_filename is not None:
-            script = services.projects.load_script(scope.project_name, script_filename)
 
-        project = services.projects.load_project(scope.project_name)
-        project_path = services.projects.get_project_path(scope.project_name)
-        artifact_episode = None
-        if script is not None and script_filename is not None:
-            artifact_episode = resolve_artifact_episode(
-                project=project,
-                script=script,
-                script_filename=script_filename,
-            )
-        resolver = active_artifact_currency_resolver(project_path, project)
+        def load_inputs() -> tuple[dict[str, Any] | None, dict[str, Any], Path, int | None, ArtifactCurrencyResolver]:
+            script: dict[str, Any] | None = None
+            if script_filename is not None:
+                script = services.projects.load_script(scope.project_name, script_filename)
+
+            project = services.projects.load_project(scope.project_name)
+            project_path = services.projects.get_project_path(scope.project_name)
+            artifact_episode = None
+            if script is not None and script_filename is not None:
+                artifact_episode = resolve_artifact_episode(
+                    project=project,
+                    script=script,
+                    script_filename=script_filename,
+                )
+            resolver = active_artifact_currency_resolver(project_path, project)
+            return script, project, project_path, artifact_episode, resolver
+
+        # 读剧本与项目、建产物时效判定器都是同步文件读写
+        script, project, project_path, artifact_episode, resolver = await run_sync_transaction(load_inputs)
 
         warnings: list[str] = []
         builder = GenerationResultBuilder(_OPERATION, GenerationSelectionMode.EXPLICIT)
@@ -263,7 +272,8 @@ async def edit_images(
                 )
             specs = []
         else:
-            specs = _build_specs(
+            specs = await asyncio.to_thread(
+                _build_specs,
                 project=project,
                 project_path=project_path,
                 resource_type=resource_type,

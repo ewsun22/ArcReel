@@ -1,11 +1,12 @@
 """分镜级分镜图/视频上传路由 + 参考单元视频上传端点测试。"""
 
 import asyncio
+import threading
 from io import BytesIO
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -20,6 +21,12 @@ from server.routers import versions as versions_router
 from server.services.currency import upload_finalize
 from server.services.tasks import formal_image_commit, generation_tasks, reference_video_tasks
 from tests.auth_deps import AUTH_DEPENDENCIES
+
+
+def _write_thumbnail(thumbnail_path: Path, content: bytes) -> None:
+    """抽帧替身的落盘：生产的抽帧由 ffmpeg 子进程写文件，不占事件循环，替身经 to_thread 调用。"""
+    thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+    thumbnail_path.write_bytes(content)
 
 
 def _img_bytes(fmt="JPEG", size=(8, 8)):
@@ -287,6 +294,49 @@ class TestShotStoryboardUpload:
             assert resp.status_code == 404
             assert resp.json()["detail"] == zh_errors.MESSAGES["project_not_found"].format(name="nope")
 
+    async def test_cancelled_while_staging_leaves_no_staged_file(self, tmp_path, monkeypatch):
+        """暂存写盘进行中被取消：等线程写完再传播取消，调用方按登记回收暂存文件。"""
+        pm = _seed_shot_project(tmp_path)
+        monkeypatch.setattr(shot_uploads, "get_project_manager", lambda: pm)
+        storyboards_dir = pm.get_project_path("demo") / "storyboards"
+        storyboards_dir.mkdir(parents=True, exist_ok=True)
+        started = threading.Event()
+        release = threading.Event()
+        staged = threading.Event()
+        original_stage = shot_uploads.stage_uploaded_bytes
+
+        def _stage(*args, **kwargs):
+            started.set()
+            release.wait(5)
+            try:
+                return original_stage(*args, **kwargs)
+            finally:
+                staged.set()
+
+        monkeypatch.setattr(shot_uploads, "stage_uploaded_bytes", _stage)
+        content = _img_bytes("PNG")
+        task = asyncio.create_task(
+            shot_uploads.upload_shot_media(
+                project_name="demo",
+                shot_id="E1S01",
+                kind="storyboard",
+                script_file="episode_1.json",
+                _t=lambda key, **_kwargs: key,
+                file=UploadFile(file=BytesIO(content), filename="board.png", size=len(content)),
+            )
+        )
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            task.cancel()
+            await asyncio.sleep(0)
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(staged.wait, 5)
+
+        assert list(storyboards_dir.iterdir()) == []
+
 
 class TestShotVideoUpload:
     def test_claim_registration_failure_restores_every_formal_video_file(self, tmp_path, monkeypatch):
@@ -319,8 +369,7 @@ class TestShotVideoUpload:
         before_version_copies: dict[str, bytes] = {}
 
         async def _new_thumbnail(_video_path: Path, thumbnail_path: Path):
-            thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-            thumbnail_path.write_bytes(b"new-thumbnail")  # noqa: ASYNC240 -- 测试内本地小文件读写/断言，不在生产事件循环上
+            await asyncio.to_thread(_write_thumbnail, thumbnail_path, b"new-thumbnail")
             return thumbnail_path
 
         monkeypatch.setattr(upload_finalize, "extract_video_thumbnail", _new_thumbnail)
@@ -346,8 +395,7 @@ class TestShotVideoUpload:
         pm.update_scene_asset("demo", "episode_1.json", "E1S01", "video_uri", "https://stale-provider-uri")
 
         async def _fake_thumbnail(video_path: Path, thumbnail_path: Path):
-            thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-            thumbnail_path.write_bytes(b"jpg")  # noqa: ASYNC240 -- 测试内本地小文件读写/断言，不在生产事件循环上
+            await asyncio.to_thread(_write_thumbnail, thumbnail_path, b"jpg")
             return thumbnail_path
 
         monkeypatch.setattr(upload_finalize, "extract_video_thumbnail", _fake_thumbnail)
@@ -474,8 +522,7 @@ def _ref_client(monkeypatch, tmp_path):
     monkeypatch.setattr(generation_tasks, "get_project_manager", lambda: pm)
 
     async def _fake_thumbnail(video_path: Path, thumbnail_path: Path):
-        thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-        thumbnail_path.write_bytes(b"jpg")  # noqa: ASYNC240 -- 测试内本地小文件读写/断言，不在生产事件循环上
+        await asyncio.to_thread(_write_thumbnail, thumbnail_path, b"jpg")
         return thumbnail_path
 
     monkeypatch.setattr(upload_finalize, "extract_video_thumbnail", _fake_thumbnail)

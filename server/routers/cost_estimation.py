@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
@@ -10,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from lib.config.resolver import ConfigResolver
 from lib.db import async_session_factory
 from lib.infra.api_errors import NotFoundError
+from lib.infra.async_thread import run_sync_transaction
 from lib.project.project_manager import get_project_manager
 from lib.script.reference_video import find_reference_unit
 from server.i18n import Translator
@@ -51,15 +51,15 @@ async def get_cost_estimate(
                 except FileNotFoundError:
                     logger.debug("剧本文件不存在，跳过: %s/%s", project_name, script_file)
 
-        return project_data, scripts
+        return project_data, scripts, pm.get_project_path(project_name)
 
-    project_data, scripts = await asyncio.to_thread(_sync)
+    project_data, scripts, project_path = await run_sync_transaction(_sync)
 
     resolver = ConfigResolver(async_session_factory)
     service = CostEstimationService(
         resolver,
         async_session_factory,
-        project_path=get_project_manager().get_project_path(project_name),
+        project_path=project_path,
     )
 
     if reference_unit_id and not any(find_reference_unit(script, reference_unit_id) for script in scripts.values()):

@@ -10,11 +10,13 @@ fingerprint 或可执行请求快照；worker 开始处理时必须重新投影�
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from lib.artifacts.video_visual_provenance import resolve_video_aspect_ratio
 from lib.config.resolver import (
     VideoGenerationType,
     video_capability_satisfied,
@@ -493,6 +495,7 @@ _PROBLEM_PRESENTATION: dict[str, tuple[str, tuple[tuple[str | int, ...], ...]]] 
     "video_capability_missing_r2v": ("configure_video_model", (("text",),)),
     "video_capability_missing_t2v": ("configure_video_model", (("text",),)),
     "video_capability_reference_unavailable": ("configure_video_model", (("text",),)),
+    "model_not_in_provider_catalog": ("configure_video_model", (("text",),)),
 }
 
 
@@ -538,7 +541,8 @@ class ReferenceUnitRequestProjector:
 
         del script
         options = options or ReferenceRequestOptions()
-        hydration = hydrate_unit_references(project, unit, resolved_assets, self._assets)
+        # 资产可用性要读产物清单、对设计图算摘要，整段水合放进工作线程。
+        hydration = await asyncio.to_thread(hydrate_unit_references, project, unit, resolved_assets, self._assets)
         canonical = hydration.declared_references
         available = hydration.available_assets
         declared_generation_type = hydration.declared_generation_type
@@ -652,6 +656,8 @@ class ReferenceUnitRequestProjector:
                 cost = VideoRequestCostFacts(
                     request_facts=facts,
                     duration_seconds=projected.slot.seconds,
+                    aspect_ratio=resolve_video_aspect_ratio(project),
+                    reference_image_count=len(request_assets),
                 )
 
         return ReferenceUnitRequestProjection(
@@ -696,14 +702,17 @@ async def project_reference_unit_request(
 
             resolver = ConfigResolver(async_session_factory)
         request_facts_lookup = configured_reference_request_facts(project, resolver)
-    projector = ReferenceUnitRequestProjector(
-        request_facts_lookup,
-        CurrentReferenceAssets(project_path, project),
-    )
+
+    def current_assets() -> tuple[CurrentReferenceAssets, tuple[ResolvedReferenceAsset, ...]]:
+        # 构造清单感知的可用性判定、展开候选路径都会碰文件系统，放进工作线程。
+        return CurrentReferenceAssets(project_path, project), resolve_reference_assets(project, project_path, unit)
+
+    assets, resolved_assets = await asyncio.to_thread(current_assets)
+    projector = ReferenceUnitRequestProjector(request_facts_lookup, assets)
     return await projector.project_current(
         project=project,
         script=script,
         unit=unit,
-        resolved_assets=resolve_reference_assets(project, project_path, unit),
+        resolved_assets=resolved_assets,
         options=options or ReferenceRequestOptions(),
     )
